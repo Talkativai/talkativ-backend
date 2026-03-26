@@ -39,10 +39,18 @@ export const extractFromPdf = async (
   filePath: string,
   fileName: string
 ): Promise<{ categorized: CategorizedData; menuItemsCreated: number; duplicatesSkipped: number }> => {
+  console.log('[extractFromPdf] called with:', filePath);
+  console.log('[extractFromPdf] file exists:', fs.existsSync(filePath));
+
   const rawText = await visionService.extractTextFromPdf(filePath);
   try { fs.unlinkSync(filePath); } catch {}
 
+  console.log('[extractFromPdf] pdf-parse text length:', rawText.length);
+  console.log('[extractFromPdf] pdf-parse preview:', rawText.substring(0, 500));
+
   const categorized = await groqService.categorizeExtractedData(rawText, 'pdf');
+
+  console.log('[extractFromPdf] Groq result:', JSON.stringify(categorized, null, 2));
 
   await prisma.businessExtraction.create({
     data: {
@@ -91,10 +99,18 @@ export const extractFromImage = async (
   filePath: string,
   fileName: string
 ): Promise<{ categorized: CategorizedData; menuItemsCreated: number; duplicatesSkipped: number }> => {
+  console.log('[extractFromImage] called with:', filePath);
+  console.log('[extractFromImage] file exists:', fs.existsSync(filePath));
+
   const rawText = await visionService.extractTextFromImage(filePath);
   try { fs.unlinkSync(filePath); } catch {}
 
+  console.log('[extractFromImage] Tesseract text length:', rawText.length);
+  console.log('[extractFromImage] Tesseract preview:', rawText.substring(0, 500));
+
   const categorized = await groqService.categorizeExtractedData(rawText, 'image');
+
+  console.log('[extractFromImage] Groq result:', JSON.stringify(categorized, null, 2));
 
   await prisma.businessExtraction.create({
     data: {
