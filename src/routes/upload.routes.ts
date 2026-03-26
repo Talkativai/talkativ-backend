@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import multer from 'multer';
+import os from 'os';
 import { authenticate } from '../middleware/auth.js';
 import * as uploadController from '../controllers/upload.controller.js';
 import { MAX_FILE_SIZE } from '../utils/constants.js';
 
 const upload = multer({
-  dest: 'uploads/',
+  dest: os.tmpdir(),
   limits: { fileSize: MAX_FILE_SIZE },
   fileFilter: (_req, file, cb) => {
     const allowed = ['application/pdf', 'image/png', 'image/jpeg', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];

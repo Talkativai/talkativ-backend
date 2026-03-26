@@ -1,3 +1,4 @@
+import fs from 'fs';
 import prisma from '../config/db.js';
 import * as groqService from './groq.service.js';
 import * as visionService from './google-vision.service.js';
@@ -38,13 +39,11 @@ export const extractFromPdf = async (
   filePath: string,
   fileName: string
 ): Promise<{ categorized: CategorizedData; menuItemsCreated: number; duplicatesSkipped: number }> => {
-  // OCR via Google Vision
   const rawText = await visionService.extractTextFromPdf(filePath);
+  try { fs.unlinkSync(filePath); } catch {}
 
-  // AI categorization
   const categorized = await groqService.categorizeExtractedData(rawText, 'pdf');
 
-  // Save extraction record
   await prisma.businessExtraction.create({
     data: {
       businessId,
@@ -67,6 +66,7 @@ export const extractFromDocx = async (
   fileName: string
 ): Promise<{ categorized: CategorizedData; menuItemsCreated: number; duplicatesSkipped: number }> => {
   const rawText = await visionService.extractTextFromDocx(filePath);
+  try { fs.unlinkSync(filePath); } catch {}
 
   const categorized = await groqService.categorizeExtractedData(rawText, 'pdf');
 
@@ -91,13 +91,11 @@ export const extractFromImage = async (
   filePath: string,
   fileName: string
 ): Promise<{ categorized: CategorizedData; menuItemsCreated: number; duplicatesSkipped: number }> => {
-  // OCR via Google Vision
   const rawText = await visionService.extractTextFromImage(filePath);
+  try { fs.unlinkSync(filePath); } catch {}
 
-  // AI categorization
   const categorized = await groqService.categorizeExtractedData(rawText, 'image');
 
-  // Save extraction record
   await prisma.businessExtraction.create({
     data: {
       businessId,

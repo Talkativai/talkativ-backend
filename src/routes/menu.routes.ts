@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import multer from 'multer';
+import os from 'os';
 import { authenticate } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { createCategorySchema, updateCategorySchema, createItemSchema, updateItemSchema, importUrlSchema, importPosSchema } from '../validators/menu.validator.js';
 import * as menuController from '../controllers/menu.controller.js';
 import { MAX_FILE_SIZE } from '../utils/constants.js';
 
-const upload = multer({ dest: 'uploads/', limits: { fileSize: MAX_FILE_SIZE } });
+const upload = multer({ dest: os.tmpdir(), limits: { fileSize: MAX_FILE_SIZE } });
 
 const router = Router();
 router.use(authenticate);
