@@ -34,9 +34,6 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().default(''),
   GOOGLE_CALLBACK_URL: z.string().default('http://localhost:5000/auth/google/callback'),
 
-  // Google Vision API
-  GOOGLE_VISION_API_KEY: z.string().default(''),
-
   // Google Gemini API
   GOOGLE_GEMINI_API_KEY: z.string().default(''),
 
