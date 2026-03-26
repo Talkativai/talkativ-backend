@@ -44,4 +44,7 @@ router.delete('/staff/:id', settingsController.deleteStaff);
 router.post('/send-otp', settingsController.sendOtp);
 router.post('/verify-otp', settingsController.verifyOtp);
 
+// Account deletion
+router.delete('/account', settingsController.deleteAccount);
+
 export default router;

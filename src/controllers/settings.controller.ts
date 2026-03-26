@@ -4,6 +4,7 @@ import { ApiError } from '../utils/apiError.js';
 import prisma from '../config/db.js';
 import * as authService from '../services/auth.service.js';
 import * as emailService from '../services/email.service.js';
+import * as elevenlabs from '../services/elevenlabs.service.js';
 import crypto from 'crypto';
 
 const getBusinessId = async (userId: string) => {
@@ -270,4 +271,30 @@ export const verifyOtp = asyncHandler(async (req: Request, res: Response) => {
   await prisma.user.update({ where: { id: user.id }, data: { twoFactorEnabled } });
 
   res.json({ message: twoFactorEnabled ? '2FA enabled' : '2FA disabled', twoFactorEnabled });
+});
+
+// ─── Delete Account ───────────────────────────────────────────────────────────
+export const deleteAccount = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+
+  // Find the business and its agent (if any)
+  const business = await prisma.business.findUnique({
+    where: { userId },
+    include: { agent: { select: { id: true, elevenlabsAgentId: true } } },
+  });
+
+  // Delete ElevenLabs agent before removing the DB record
+  if (business?.agent?.elevenlabsAgentId) {
+    try {
+      await elevenlabs.deleteAgent(business.agent.elevenlabsAgentId);
+    } catch (err) {
+      console.error('Failed to delete ElevenLabs agent during account deletion:', err);
+      // Non-fatal — proceed with DB deletion regardless
+    }
+  }
+
+  // Deleting the user cascades to Business → Agent and all related records
+  await prisma.user.delete({ where: { id: userId } });
+
+  res.json({ message: 'Account deleted' });
 });
