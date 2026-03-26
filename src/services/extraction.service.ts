@@ -1,7 +1,7 @@
 import prisma from '../config/db.js';
-import * as geminiService from './gemini.service.js';
+import * as groqService from './groq.service.js';
 import * as visionService from './google-vision.service.js';
-import type { CategorizedData } from './gemini.service.js';
+import type { CategorizedData } from './groq.service.js';
 
 // ─── Extract + categorize from URL ──────────────────────────────────────────
 export const extractFromUrl = async (
@@ -9,10 +9,10 @@ export const extractFromUrl = async (
   url: string
 ): Promise<{ categorized: CategorizedData; menuItemsCreated: number; duplicatesSkipped: number }> => {
   // Scrape and get raw text
-  const rawText = await geminiService.scrapeAndAnalyzeUrl(url);
+  const rawText = await groqService.scrapeAndAnalyzeUrl(url);
 
   // AI categorization
-  const categorized = await geminiService.categorizeExtractedData(rawText, 'url');
+  const categorized = await groqService.categorizeExtractedData(rawText, 'url');
 
   // Save extraction record
   await prisma.businessExtraction.create({
@@ -42,7 +42,7 @@ export const extractFromPdf = async (
   const rawText = await visionService.extractTextFromPdf(filePath);
 
   // AI categorization
-  const categorized = await geminiService.categorizeExtractedData(rawText, 'pdf');
+  const categorized = await groqService.categorizeExtractedData(rawText, 'pdf');
 
   // Save extraction record
   await prisma.businessExtraction.create({
@@ -68,7 +68,7 @@ export const extractFromDocx = async (
 ): Promise<{ categorized: CategorizedData; menuItemsCreated: number; duplicatesSkipped: number }> => {
   const rawText = await visionService.extractTextFromDocx(filePath);
 
-  const categorized = await geminiService.categorizeExtractedData(rawText, 'pdf');
+  const categorized = await groqService.categorizeExtractedData(rawText, 'pdf');
 
   await prisma.businessExtraction.create({
     data: {
@@ -95,7 +95,7 @@ export const extractFromImage = async (
   const rawText = await visionService.extractTextFromImage(filePath);
 
   // AI categorization
-  const categorized = await geminiService.categorizeExtractedData(rawText, 'image');
+  const categorized = await groqService.categorizeExtractedData(rawText, 'image');
 
   // Save extraction record
   await prisma.businessExtraction.create({

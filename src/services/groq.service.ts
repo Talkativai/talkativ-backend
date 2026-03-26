@@ -1,11 +1,10 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import Groq from 'groq-sdk';
 import { env } from '../config/env.js';
 
-const genAI = new GoogleGenerativeAI(env.GOOGLE_GEMINI_API_KEY);
+const groq = new Groq({ apiKey: env.GROQ_API_KEY });
 
 // ─── Scrape and analyze a URL ───────────────────────────────────────────────
 export const scrapeAndAnalyzeUrl = async (url: string): Promise<string> => {
-  // Fetch the webpage HTML
   const res = await fetch(url, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (compatible; TalkativBot/1.0)',
@@ -15,14 +14,13 @@ export const scrapeAndAnalyzeUrl = async (url: string): Promise<string> => {
 
   const html = await res.text();
 
-  // Strip script/style tags first, then HTML tags for a cleaner text
   const cleanText = html
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
     .replace(/<[^>]*>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .substring(0, 15000); // Limit to ~15K chars for Gemini context
+    .substring(0, 15000);
 
   return cleanText;
 };
@@ -57,8 +55,6 @@ export const categorizeExtractedData = async (
   rawText: string,
   source: 'url' | 'pdf' | 'image'
 ): Promise<CategorizedData> => {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-
   const prompt = `You are a restaurant data extraction AI. Analyze the following text extracted from a ${source} and categorize ALL the information you can find into the following categories. Return ONLY valid JSON, no markdown, no code blocks.
 
 TEXT TO ANALYZE:
@@ -111,10 +107,15 @@ IMPORTANT RULES:
 - Only include information you are confident about
 - Do not make up or hallucinate data`;
 
-  const result = await model.generateContent(prompt);
-  const responseText = result.response.text();
+  const completion = await groq.chat.completions.create({
+    model: 'llama-3.3-70b-versatile',
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.1,
+    max_tokens: 4096,
+  });
 
-  // Clean the response — remove markdown code blocks if present
+  const responseText = completion.choices[0]?.message?.content ?? '';
+
   const cleanJson = responseText
     .replace(/```json\n?/g, '')
     .replace(/```\n?/g, '')
@@ -124,8 +125,7 @@ IMPORTANT RULES:
     const parsed = JSON.parse(cleanJson) as CategorizedData;
     return parsed;
   } catch (err) {
-    console.error('Failed to parse Gemini response:', cleanJson);
-    // Return empty structure on parse failure
+    console.error('Failed to parse Groq response:', cleanJson);
     return {
       menu: { categories: [] },
       hours: null,

@@ -34,8 +34,11 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().default(''),
   GOOGLE_CALLBACK_URL: z.string().default('http://localhost:5000/auth/google/callback'),
 
-  // Google Gemini API
-  GOOGLE_GEMINI_API_KEY: z.string().default(''),
+  // Groq AI
+  GROQ_API_KEY: z.string().default(''),
+
+  // Google API (Places API)
+  GOOGLE_API_KEY: z.string().default(''),
 
   // Stripe price IDs
   STRIPE_STARTER_PRICE_ID: z.string().default(''),

@@ -3,7 +3,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/apiError.js';
 import prisma from '../config/db.js';
 import * as extractionService from '../services/extraction.service.js';
-import type { CategorizedData } from '../services/gemini.service.js';
+import type { CategorizedData } from '../services/groq.service.js';
 import type { PosSystem } from '../validators/menu.validator.js';
 
 const buildCategorizedResponse = (categorized: CategorizedData, created: number, skipped: number) => {

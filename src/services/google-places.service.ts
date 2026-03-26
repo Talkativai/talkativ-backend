@@ -11,10 +11,10 @@ export const searchBusiness = async (query: string): Promise<{
   lat?: number;
   lng?: number;
 } | null> => {
-  if (!env.GOOGLE_GEMINI_API_KEY) return null;
+  if (!env.GOOGLE_API_KEY) return null;
 
   // Use Google Places Text Search API (New)
-  const apiKey = env.GOOGLE_GEMINI_API_KEY;
+  const apiKey = env.GOOGLE_API_KEY;
   
   // First: Text Search to find the place
   const searchRes = await fetch(
@@ -71,7 +71,7 @@ export const searchBusinesses = async (query: string): Promise<Array<{
   category: string;
   placeId: string;
 }>> => {
-  const apiKey = env.GOOGLE_GEMINI_API_KEY;
+  const apiKey = env.GOOGLE_API_KEY;
   if (!apiKey) return [];
 
   const searchRes = await fetch(
