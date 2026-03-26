@@ -108,7 +108,7 @@ export const createAgent = async (config: {
     const error = await res.text();
     throw new Error(`ElevenLabs createAgent failed: ${error}`);
   }
-  return res.json();
+  return res.json() as Promise<{ agent_id: string }>;
 };
 
 export const updateAgent = async (agentId: string, updates: Record<string, any>) => {

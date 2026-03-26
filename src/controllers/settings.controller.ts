@@ -68,7 +68,7 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
   const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
   if (!user) throw ApiError.notFound('User not found');
 
-  const valid = await authService.comparePassword(req.body.currentPassword, user.passwordHash);
+  const valid = await authService.comparePassword(req.body.currentPassword, user.passwordHash ?? '');
   if (!valid) throw ApiError.unauthorized('Current password is incorrect');
 
   const newHash = await authService.hashPassword(req.body.newPassword);

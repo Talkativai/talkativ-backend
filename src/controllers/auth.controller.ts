@@ -72,7 +72,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user) throw ApiError.unauthorized('Invalid email or password');
 
-  const valid = await authService.comparePassword(password, user.passwordHash);
+  const valid = await authService.comparePassword(password, user.passwordHash ?? '');
   if (!valid) throw ApiError.unauthorized('Invalid email or password');
 
   // Create session
