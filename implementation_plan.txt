@@ -1,0 +1,1009 @@
+================================================================================
+  TALKATIV — BACKEND IMPLEMENTATION PLAN
+  Full-stack Node.js/Express + Prisma + PostgreSQL (Neon)
+================================================================================
+
+TABLE OF CONTENTS
+─────────────────
+  1.  Architecture Overview
+  2.  Tech Stack & Packages
+  3.  Folder Structure
+  4.  Database Schema (Prisma)
+  5.  Authentication Flow (Secure Routes)
+  6.  API Routes — Full Mapping
+  7.  Onboarding Flow
+  8.  ElevenLabs Conversational AI Integration
+  9.  Stripe Billing Integration
+  10. Email System (Resend)
+  11. File Uploads (Menu PDF/DOCX)
+  12. Real-time Features
+  13. Security Architecture
+  14. Environment Variables
+  15. Verification & Testing Plan
+
+
+================================================================================
+1. ARCHITECTURE OVERVIEW
+================================================================================
+
+Frontend (React/Vite) ──── REST API ──── PostgreSQL (Neon)
+    ↕                        ↕                ↕
+  Stripe.js            ElevenLabs API    Prisma ORM
+  (payments)           (voice agents)    (queries)
+                            ↕
+                       Resend (email)
+
+Flow:
+  Landing → Onboarding (8 steps) → Dashboard (10 pages)
+  
+  The frontend currently has NO backend connection. All data is hardcoded.
+  This plan maps every feature to a backend endpoint.
+
+
+================================================================================
+2. TECH STACK & PACKAGES
+================================================================================
+
+| Package              | Purpose                               |
+|----------------------|---------------------------------------|
+| express              | Web framework                         |
+| @prisma/client       | ORM for PostgreSQL (Neon)             |
+| prisma               | Prisma CLI for migrations             |
+| bcryptjs             | Password hashing (argon2 alternative) |
+| jsonwebtoken         | JWT access + refresh tokens           |
+| zod                  | Request body/param validation         |
+| cors                 | Cross-origin resource sharing         |
+| helmet               | Security headers                      |
+| express-rate-limit   | Brute-force protection                |
+| multer               | File uploads (PDF, DOCX, images)      |
+| pdf-parse            | PDF text extraction (menu import)     |
+| mammoth              | DOCX text extraction (menu import)    |
+| resend               | Transactional email                   |
+| uuid                 | Unique IDs for orders, calls, etc.    |
+| dotenv               | Load .env variables                   |
+| tsx                  | TypeScript runner (dev mode)          |
+| typescript           | TypeScript compiler                   |
+| stripe               | Stripe SDK for billing                |
+| elevenlabs           | ElevenLabs SDK (or raw fetch)         |
+| cookie-parser        | Parse refresh token cookies           |
+| morgan               | HTTP request logging                  |
+
+
+================================================================================
+3. FOLDER STRUCTURE
+================================================================================
+
+backend/
+├── .env                          # Environment variables
+├── .env.example                  # Template (no secrets)
+├── package.json
+├── tsconfig.json
+├── prisma/
+│   ├── schema.prisma             # Database schema
+│   └── seed.ts                   # Seed data for dev
+├── src/
+│   ├── index.ts                  # Entry point — Express app setup
+│   ├── app.ts                    # Express app config (middleware)
+│   ├── config/
+│   │   ├── env.ts                # Validated env vars (zod)
+│   │   ├── db.ts                 # Prisma client singleton
+│   │   └── stripe.ts             # Stripe client setup
+│   ├── middleware/
+│   │   ├── auth.ts               # JWT verification middleware
+│   │   ├── rateLimiter.ts        # Rate limiting config
+│   │   ├── validate.ts           # Zod validation middleware
+│   │   └── errorHandler.ts       # Global error handler
+│   ├── routes/
+│   │   ├── auth.routes.ts        # /auth/login/<hash>, /auth/register/<hash>
+│   │   ├── business.routes.ts    # Business CRUD + settings
+│   │   ├── agent.routes.ts       # AI agent config (voice, script, etc.)
+│   │   ├── calls.routes.ts       # Call logs + analytics
+│   │   ├── orders.routes.ts      # Order management
+│   │   ├── reservations.routes.ts # Reservation management
+│   │   ├── menu.routes.ts        # Menu categories + items
+│   │   ├── integrations.routes.ts # Integration connections
+│   │   ├── billing.routes.ts     # Stripe subscriptions
+│   │   ├── settings.routes.ts    # User settings (profile, security)
+│   │   ├── upload.routes.ts      # File upload endpoints
+│   │   └── webhook.routes.ts     # ElevenLabs + Stripe webhooks (public)
+│   ├── controllers/
+│   │   ├── auth.controller.ts
+│   │   ├── business.controller.ts
+│   │   ├── agent.controller.ts
+│   │   ├── calls.controller.ts
+│   │   ├── orders.controller.ts
+│   │   ├── reservations.controller.ts
+│   │   ├── menu.controller.ts
+│   │   ├── integrations.controller.ts
+│   │   ├── billing.controller.ts
+│   │   ├── settings.controller.ts
+│   │   ├── upload.controller.ts
+│   │   └── webhook.controller.ts
+│   ├── services/
+│   │   ├── auth.service.ts       # JWT sign/verify, password hash
+│   │   ├── elevenlabs.service.ts # Agent create/update/delete, voice list
+│   │   ├── stripe.service.ts     # Subscription create/cancel/update
+│   │   ├── email.service.ts      # Send via Resend
+│   │   ├── menu-parser.service.ts # PDF/DOCX/URL extraction
+│   │   └── analytics.service.ts  # KPI calculations
+│   ├── validators/
+│   │   ├── auth.validator.ts     # Zod schemas for auth
+│   │   ├── business.validator.ts
+│   │   ├── agent.validator.ts
+│   │   ├── menu.validator.ts
+│   │   └── order.validator.ts
+│   └── utils/
+│       ├── apiError.ts           # Custom error class
+│       ├── asyncHandler.ts       # Async route wrapper
+│       └── constants.ts          # Shared constants
+└── uploads/                      # Uploaded files (gitignored)
+
+
+================================================================================
+4. DATABASE SCHEMA (Prisma)
+================================================================================
+
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── USER & AUTH ─────────────────────────────────────────────────────────────
+
+model User {
+  id              String    @id @default(uuid())
+  email           String    @unique
+  passwordHash    String
+  firstName       String
+  lastName        String
+  role            Role      @default(OWNER)
+  twoFactorEnabled Boolean  @default(false)
+  twoFactorSecret  String?
+  emailVerified   Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  business        Business?
+  sessions        Session[]
+  refreshTokens   RefreshToken[]
+}
+
+enum Role {
+  OWNER
+  MANAGER
+  STAFF
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  device    String             // "Chrome · MacBook Pro"
+  location  String             // "Manchester, UK"
+  ip        String
+  lastActive DateTime @default(now())
+  createdAt DateTime  @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── BUSINESS ────────────────────────────────────────────────────────────────
+
+model Business {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  name            String
+  type            String              // "Pizza Restaurant"
+  address         String
+  phone           String
+  email           String?
+  website         String?
+  primaryLanguage String   @default("en")
+  timezone        String   @default("Europe/London")
+  openingHours    Json?               // { mon: "11am-11pm", tue: "11am-11pm", ... }
+  onboardingStep  Int      @default(0) // 0-7, tracks onboarding progress
+  onboardingDone  Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agent           Agent?
+  menuCategories  MenuCategory[]
+  calls           Call[]
+  orders          Order[]
+  reservations    Reservation[]
+  integrations    Integration[]
+  subscription    Subscription?
+  phoneConfig     PhoneConfig?
+  notifSettings   NotificationSettings?
+}
+
+// ─── AI AGENT (ElevenLabs) ───────────────────────────────────────────────────
+
+model Agent {
+  id                  String   @id @default(uuid())
+  businessId          String   @unique
+  elevenlabsAgentId   String?             // ElevenLabs agent ID (agent_xxx)
+  name                String   @default("Aria")
+  voiceId             String   @default("21m00Tcm4TlvDq8ikWAM") // Rachel
+  voiceName           String   @default("Aria")
+  voiceDescription    String   @default("Warm & professional")
+  openingGreeting     String   @default("Thanks for calling! How can I help you today?")
+  closingMessage      String?
+  systemPrompt        String?             // Full system prompt sent to ElevenLabs
+  transferNumber      String?             // Fallback transfer number
+  transferEnabled     Boolean  @default(true)
+  takeMessages        Boolean  @default(true)
+  acceptOrders        Boolean  @default(true)
+  takeReservations    Boolean  @default(true)
+  answerAfterHours    Boolean  @default(true)
+  aiPhoneNumber       String?             // Provisioned phone number
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  business            Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// ─── PHONE CONFIG ────────────────────────────────────────────────────────────
+
+model PhoneConfig {
+  id              String   @id @default(uuid())
+  businessId      String   @unique
+  forwardNumber   String?             // Backup/forward number
+  ringsBeforeAria Int      @default(0) // 0 = immediately
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// ─── NOTIFICATION SETTINGS ───────────────────────────────────────────────────
+
+model NotificationSettings {
+  id                  String   @id @default(uuid())
+  businessId          String   @unique
+  emailNewOrder       Boolean  @default(true)
+  emailMissedCall     Boolean  @default(true)
+  emailDailySummary   Boolean  @default(true)
+  pushLiveCall        Boolean  @default(true)
+  pushNewOrder        Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  business            Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// ─── CALLS ───────────────────────────────────────────────────────────────────
+
+model Call {
+  id            String     @id @default(uuid())
+  businessId    String
+  callerName    String?
+  callerPhone   String?
+  status        CallStatus @default(RINGING)
+  outcome       String?              // "Order placed", "Menu enquiry", "Hours check"
+  outcomeType   OutcomeType?         // ORDER, ENQUIRY, MISSED
+  duration      Int?                 // seconds
+  amount        Decimal?             // revenue if order
+  transcript    String?              // Full transcript from ElevenLabs
+  recordingUrl  String?
+  elevenlabsConvId  String?          // ElevenLabs conversation ID
+  startedAt     DateTime  @default(now())
+  endedAt       DateTime?
+  createdAt     DateTime  @default(now())
+
+  business      Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  order         Order?
+}
+
+enum CallStatus {
+  RINGING
+  LIVE
+  COMPLETED
+  MISSED
+}
+
+enum OutcomeType {
+  ORDER
+  ENQUIRY
+  MISSED
+  RESERVATION
+}
+
+// ─── ORDERS ──────────────────────────────────────────────────────────────────
+
+model Order {
+  id            String      @id @default(uuid())
+  businessId    String
+  callId        String?     @unique
+  customerName  String
+  items         String                // "Large pepperoni, garlic bread"
+  itemsJson     Json?                 // Structured: [{ name, qty, price }]
+  type          OrderType   @default(DELIVERY)
+  status        OrderStatus @default(PENDING)
+  amount        Decimal
+  notes         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  business      Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  call          Call?       @relation(fields: [callId], references: [id])
+}
+
+enum OrderType {
+  DELIVERY
+  COLLECTION
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PREPARING
+  READY
+  COMPLETED
+  CANCELLED
+}
+
+// ─── RESERVATIONS ────────────────────────────────────────────────────────────
+
+model Reservation {
+  id            String            @id @default(uuid())
+  businessId    String
+  guestName     String
+  guestPhone    String?
+  guests        Int
+  dateTime      DateTime
+  status        ReservationStatus @default(PENDING)
+  note          String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  business      Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  NO_SHOW
+  COMPLETED
+}
+
+// ─── MENU ────────────────────────────────────────────────────────────────────
+
+model MenuCategory {
+  id          String    @id @default(uuid())
+  businessId  String
+  name        String              // "Pizzas", "Pasta", "Sides"
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  business    Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  items       MenuItem[]
+}
+
+model MenuItem {
+  id          String    @id @default(uuid())
+  categoryId  String
+  name        String
+  description String?
+  price       Decimal
+  status      MenuItemStatus @default(ACTIVE)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  category    MenuCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+}
+
+enum MenuItemStatus {
+  ACTIVE
+  INACTIVE
+  OUT_OF_STOCK
+}
+
+// ─── INTEGRATIONS ────────────────────────────────────────────────────────────
+
+model Integration {
+  id            String            @id @default(uuid())
+  businessId    String
+  name          String                      // "Toast POS", "Clover", "OpenTable"
+  category      String                      // "POS", "Reservations", "Analytics"
+  status        IntegrationStatus @default(AVAILABLE)
+  config        Json?                       // Integration-specific config
+  lastSynced    DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  business      Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+enum IntegrationStatus {
+  AVAILABLE
+  CONNECTED
+  ERROR
+}
+
+// ─── BILLING (Stripe) ────────────────────────────────────────────────────────
+
+model Subscription {
+  id                  String             @id @default(uuid())
+  businessId          String             @unique
+  stripeCustomerId    String?
+  stripeSubscriptionId String?
+  plan                PlanType           @default(STARTER)
+  status              SubscriptionStatus @default(TRIALING)
+  trialEndsAt         DateTime?
+  currentPeriodEnd    DateTime?
+  cancelAtPeriodEnd   Boolean            @default(false)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  business            Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  invoices            Invoice[]
+}
+
+enum PlanType {
+  STARTER     // £199/mo
+  GROWTH      // £399/mo
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  PAUSED
+}
+
+model Invoice {
+  id              String   @id @default(uuid())
+  subscriptionId  String
+  stripeInvoiceId String?
+  amount          Decimal
+  status          String              // "paid", "pending", "failed"
+  paidAt          DateTime?
+  periodStart     DateTime
+  periodEnd       DateTime
+  createdAt       DateTime @default(now())
+
+  subscription    Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+}
+
+
+================================================================================
+5. AUTHENTICATION FLOW (Secure Routes)
+================================================================================
+
+SECURITY: Auth routes use hashed paths to prevent brute-force discovery.
+
+Env vars:
+  AUTH_LOGIN_HASH    = a7f3c9d2e1b4056f8e3a9c7d2b1f4e6a8d3c5b7e9f1a2c4d6e8f0a1b3c5d7e9
+  AUTH_REGISTER_HASH = b8e4d0c3f2a5167e9f4b0d8e3c2a5f7b9e4d6c8a0f2b3e5d7c9a1b4d6f8e0a2
+
+Routes:
+  POST /auth/login/a7f3c9d2e1b4056f8e3a9c7d2b1f4e6a8d3c5b7e9f1a2c4d6e8f0a1b3c5d7e9
+  POST /auth/register/b8e4d0c3f2a5167e9f4b0d8e3c2a5f7b9e4d6c8a0f2b3e5d7c9a1b4d6f8e0a2
+  POST /auth/refresh-token
+  POST /auth/logout
+  POST /auth/forgot-password
+  POST /auth/reset-password/:token
+  POST /auth/verify-email/:token
+
+Registration Flow:
+  1. Frontend POSTs to /auth/register/<hash> with { email, password, firstName, lastName }
+  2. Backend validates with Zod, hashes password with bcryptjs
+  3. Creates User record in DB
+  4. Sends verification email via Resend
+  5. Returns { accessToken, refreshToken, user }
+  6. Frontend stores accessToken in memory, refreshToken in httpOnly cookie
+
+Login Flow:
+  1. Frontend POSTs to /auth/login/<hash> with { email, password }
+  2. Backend verifies password with bcrypt.compare()
+  3. If 2FA enabled → returns { require2FA: true, tempToken }
+  4. If 2FA not enabled → returns { accessToken, refreshToken, user }
+  5. Creates Session record (device, location, IP)
+
+Token Strategy:
+  - Access Token: 15 min expiry, stored in memory / authorization header
+  - Refresh Token: 7 day expiry, stored in httpOnly cookie
+  - On 401 → frontend calls /auth/refresh-token → gets new access token
+  - Refresh token rotation: old token invalidated, new one issued
+
+Password Security:
+  - bcryptjs with 12 salt rounds
+  - Minimum 8 characters enforced by Zod
+  - Rate limited: 5 attempts per 15 min per IP
+
+
+================================================================================
+6. API ROUTES — FULL MAPPING
+================================================================================
+
+All routes below require JWT auth unless marked [PUBLIC].
+
+--- DASHBOARD (PageDashboard) ---
+GET  /api/dashboard/stats              → KPI values (calls today, revenue, avg time, answer rate)
+GET  /api/dashboard/recent-calls       → Last 5 calls
+GET  /api/dashboard/agent-status       → Agent active status + config summary
+GET  /api/dashboard/chart-data         → Weekly call volume for bar chart
+
+--- CALLS (PageCalls) ---
+GET  /api/calls                        → Paginated call list (filter: All/Orders/Enquiries/Missed, date: today/yesterday/week/month)
+GET  /api/calls/:id                    → Single call detail + transcript
+GET  /api/calls/stats                  → KPI: total, answered, avg duration, orders taken
+POST /api/calls/export                 → Generate CSV export
+
+--- ORDERS (PageOrders) ---
+GET  /api/orders                       → Paginated orders (filter: type, status, date)
+GET  /api/orders/:id                   → Single order detail
+PUT  /api/orders/:id/status            → Update order status
+GET  /api/orders/stats                 → KPI: orders today, revenue, avg value, delivery rate
+POST /api/orders/export                → Generate CSV export
+
+--- RESERVATIONS (PageReservations) ---
+GET  /api/reservations                 → Paginated reservations (view: list/calendar)
+POST /api/reservations                 → Create new reservation
+PUT  /api/reservations/:id             → Update reservation
+DELETE /api/reservations/:id           → Cancel reservation
+GET  /api/reservations/stats           → KPI: today's covers, weekly, avg party, no-show rate
+
+--- MY AGENT (PageMyAgent) ---
+GET  /api/agent                        → Agent config + stats
+PUT  /api/agent                        → Update agent (name, voice, greeting, etc.)
+GET  /api/agent/transcripts            → Recent call transcripts
+POST /api/agent/test-call              → Trigger a test call via ElevenLabs
+
+--- VOICE & SCRIPT (PageVoiceScript) ---
+GET  /api/voices                       → List available ElevenLabs voices
+PUT  /api/agent/voice                  → Update voice selection
+PUT  /api/agent/script                 → Update greeting, closing, system prompt
+PUT  /api/agent/call-rules             → Update transfer rules (number, behavior)
+
+--- MENU (PageMenu) ---
+GET  /api/menu/categories              → All categories with item counts
+GET  /api/menu/categories/:id/items    → Items in a category
+POST /api/menu/categories              → Create category
+PUT  /api/menu/categories/:id          → Rename category
+DELETE /api/menu/categories/:id        → Delete category + items
+POST /api/menu/items                   → Create new item
+PUT  /api/menu/items/:id               → Update item (name, price, status)
+DELETE /api/menu/items/:id             → Delete item
+POST /api/menu/import/url              → Parse menu from URL
+POST /api/menu/import/pdf              → Parse menu from uploaded PDF
+POST /api/menu/sync-pos                → Sync with connected POS
+
+--- INTEGRATIONS (PageIntegrations) ---
+GET  /api/integrations                 → All integrations with statuses
+POST /api/integrations/:id/connect     → Connect an integration
+DELETE /api/integrations/:id/disconnect → Disconnect
+GET  /api/integrations/:id/status      → Check connection health
+
+--- BILLING (PageBilling) ---
+GET  /api/billing                      → Current plan, next billing, usage
+GET  /api/billing/invoices             → Invoice history
+POST /api/billing/subscribe            → Create Stripe subscription
+PUT  /api/billing/plan                 → Change plan (Starter ↔ Growth)
+POST /api/billing/cancel               → Cancel subscription
+PUT  /api/billing/payment-method       → Update card via Stripe
+GET  /api/billing/portal               → Get Stripe customer portal URL
+
+--- SETTINGS (PageSettings) ---
+GET  /api/settings/business            → Business details
+PUT  /api/settings/business            → Update business info
+GET  /api/settings/notifications       → Notification preferences
+PUT  /api/settings/notifications       → Update notification preferences
+GET  /api/settings/phone               → Phone config (forward number, rings)
+PUT  /api/settings/phone               → Update phone config
+PUT  /api/settings/password            → Change password
+PUT  /api/settings/2fa/enable          → Enable 2FA (returns QR code)
+PUT  /api/settings/2fa/disable         → Disable 2FA
+GET  /api/settings/sessions            → Active sessions list
+DELETE /api/settings/sessions/:id      → Revoke a session
+
+--- FILE UPLOADS ---
+POST /api/upload/menu-pdf              → Upload PDF for menu import
+POST /api/upload/menu-image            → Upload image (OCR via Anthropic)
+
+--- WEBHOOKS [PUBLIC] ---
+POST /webhooks/elevenlabs              → ElevenLabs conversation events
+POST /webhooks/stripe                  → Stripe payment events
+
+
+================================================================================
+7. ONBOARDING FLOW
+================================================================================
+
+The frontend has 8 steps. Backend tracks progress via Business.onboardingStep.
+
+Step 0 — Hear it live (demo call)
+  → No backend call needed. Frontend plays a demo.
+  → OR: POST /api/agent/demo-call → triggers ElevenLabs demo
+
+Step 1 — Create account
+  → POST /auth/register/<hash>
+  → Creates User + empty Business shell
+  → Business.onboardingStep = 1
+
+Step 2 — Business info
+  → PUT /api/onboarding/business
+  → Body: { name, type, address, phone, hours }
+  → Auto-fetches Google Place details if available
+  → Business.onboardingStep = 2
+
+Step 3 — Import menu
+  → POST /api/menu/import/url    (if URL selected)
+  → POST /api/menu/import/pdf    (if PDF uploaded)
+  → POST /api/menu/import/pos    (if POS selected)
+  → Parses and creates MenuCategory + MenuItem records
+  → Business.onboardingStep = 3
+
+Step 4 — AI voice & script
+  → PUT /api/agent/voice   → { voiceId, voiceName }
+  → PUT /api/agent/script  → { openingGreeting, closingMessage }
+  → Creates ElevenLabs agent via API
+  → Business.onboardingStep = 4
+
+Step 5 — Phone number
+  → POST /api/agent/provision-phone
+  → Provisions number via ElevenLabs phone API
+  → Assigns to agent
+  → Business.onboardingStep = 5
+
+Step 6 — Test call
+  → POST /api/agent/test-call
+  → ElevenLabs initiates outbound test call
+  → Frontend shows live status
+  → Business.onboardingStep = 6
+
+Step 7 — Choose plan
+  → POST /api/billing/subscribe
+  → Body: { plan: "STARTER" | "GROWTH", paymentMethodId }
+  → Creates Stripe customer + subscription (14-day trial)
+  → Business.onboardingStep = 7
+  → Business.onboardingDone = true
+
+
+================================================================================
+8. ELEVENLABS CONVERSATIONAL AI INTEGRATION
+================================================================================
+
+Service: src/services/elevenlabs.service.ts
+
+--- 8.1 Agent Lifecycle ---
+
+CREATE agent (during onboarding Step 4):
+  POST https://api.elevenlabs.io/v1/convai/agents/create
+  Headers: { xi-api-key: ELEVENLABS_API_KEY }
+  Body:
+    {
+      name: "Aria — Tony's Pizzeria",
+      conversation_config: {
+        agent: {
+          prompt: { prompt: <system_prompt> },
+          first_message: <opening_greeting>,
+          language: "en"
+        },
+        tts: { voice_id: <selected_voice_id> }
+      },
+      platform_settings: {
+        widget: { variant: "compact" }
+      }
+    }
+
+UPDATE agent (when user changes voice/script/rules):
+  PATCH https://api.elevenlabs.io/v1/convai/agents/{agent_id}
+
+DELETE agent (when business is deleted):
+  DELETE https://api.elevenlabs.io/v1/convai/agents/{agent_id}
+
+--- 8.2 Tool Endpoints (called BY ElevenLabs during calls) ---
+
+These are webhook URLs that ElevenLabs calls mid-conversation.
+They MUST respond under 1.5 seconds.
+
+POST /api/public/catalogue-lookup
+  → Receives: { query, business_id }
+  → Searches MenuItem table, returns matching items
+  → Response: { items: [{ name, description, price }] }
+
+POST /api/public/create-order
+  → Receives: { business_id, customer_name, items, type }
+  → Creates Order record in DB
+  → Response: { order_id, confirmation: "Order created!" }
+
+POST /api/public/create-reservation
+  → Receives: { business_id, guest_name, guests, date_time }
+  → Creates Reservation record
+  → Response: { reservation_id, confirmation }
+
+POST /api/public/check-hours
+  → Receives: { business_id }
+  → Returns current opening hours from Business.openingHours
+
+--- 8.3 Webhook Handling ---
+
+POST /webhooks/elevenlabs
+  Verifies: AGENT_WEBHOOK_SECRET header
+
+  Event: conversation_initiation_metadata
+    → Create Call record (status: LIVE, startedAt: now)
+
+  Event: conversation_ended
+    → Update Call record (status: COMPLETED/MISSED, duration, transcript)
+    → Calculate order amount if order was placed
+    → Send notification email if configured
+
+--- 8.4 Voice Models Available ---
+
+  Female:
+    Rachel  → 21m00Tcm4TlvDq8ikWAM  (warm, conversational)  — default "Aria"
+    Domi    → AZnzlk1XvdvUeBnXmlld  (confident)
+    Bella   → EXAVITQu4vr4xnSDxMaL  (soft, pleasant)
+    Elli    → MF3mGyEYCl7XYWbV9V6O  (young, friendly)
+
+  Male:
+    Antoni  → ErXwobaYiN019PkySvjV  (well-rounded)
+    Arnold  → VR6AewLTigWG4xSOukaG  (crisp, professional)
+    Adam    → pNInz6obpgDQGcFmaJgB  (deep, authoritative)
+    Sam     → yoZ06aMxZJJ28mfd3POQ  (raspy, casual)
+
+--- 8.5 System Prompt Template ---
+
+  Generated per-business. Example:
+
+  """
+  You are {agent_name}, the AI phone assistant for {business_name}.
+  Business type: {business_type}
+  Location: {address}
+  Hours: {opening_hours}
+
+  YOUR CAPABILITIES:
+  - Answer questions about the menu using the lookup_catalogue tool
+  - Take phone orders using the create_order tool
+  - Book reservations using the create_reservation tool
+  - Provide business hours using the check_hours tool
+
+  RULES:
+  - Always be warm, friendly, and professional
+  - If you cannot help, transfer to {transfer_number}
+  - Before transferring, offer to take a message
+  - Always match the caller's language
+  - Confirm orders before finalizing
+
+  OPENING: {opening_greeting}
+  """
+
+
+================================================================================
+9. STRIPE BILLING INTEGRATION
+================================================================================
+
+Service: src/services/stripe.service.ts
+
+Plans (from frontend Step 7):
+  STARTER: £199/mo — 100% calls, menu Q&A, basic analytics, email support
+  GROWTH:  £399/mo — Everything + orders, reservations, POS, priority support
+
+Flow:
+  1. POST /api/billing/subscribe
+     → stripe.customers.create({ email, name })
+     → stripe.subscriptions.create({ customer, price, trial_period_days: 14 })
+     → Save stripeCustomerId + stripeSubscriptionId to Subscription table
+
+  2. Webhook: POST /webhooks/stripe
+     Event: invoice.payment_succeeded → Update subscription status ACTIVE
+     Event: invoice.payment_failed   → Update status PAST_DUE, send email
+     Event: customer.subscription.deleted → Update status CANCELLED
+
+  3. PUT /api/billing/plan
+     → stripe.subscriptions.update(subscriptionId, { items: [{ price: newPriceId }] })
+
+  4. POST /api/billing/cancel
+     → stripe.subscriptions.update(subscriptionId, { cancel_at_period_end: true })
+
+  5. GET /api/billing/portal
+     → stripe.billingPortal.sessions.create({ customer, return_url })
+     → Returns URL for Stripe-hosted portal
+
+Stripe Price IDs (to be created in Stripe Dashboard):
+  price_starter_monthly = (create in Stripe for £199/mo)
+  price_growth_monthly  = (create in Stripe for £399/mo)
+
+
+================================================================================
+10. EMAIL SYSTEM (Resend)
+================================================================================
+
+Service: src/services/email.service.ts
+
+Templates to build:
+  1. Welcome / Email Verification    — after registration
+  2. Password Reset                  — forgot password link
+  3. Order Confirmation              — new order placed by AI
+  4. Missed Call Alert               — when a call is missed
+  5. Daily Summary                   — calls, orders, revenue for the day
+  6. Payment Receipt                 — Stripe invoice paid
+  7. Trial Ending Soon               — 3 days before trial expires
+  8. Subscription Cancelled          — cancellation confirmation
+
+Config:
+  From: noreply@talkativ.io
+  Provider: Resend (RESEND_API_KEY)
+
+
+================================================================================
+11. FILE UPLOADS (Menu Import)
+================================================================================
+
+Service: src/services/menu-parser.service.ts
+
+Multer config:
+  - Storage: disk (./uploads/)
+  - File types: PDF, DOCX, PNG, JPG
+  - Max size: 10MB
+
+Parsing pipeline:
+  1. PDF → pdf-parse → raw text → AI parse into categories + items
+  2. DOCX → mammoth → HTML → strip tags → AI parse
+  3. URL → fetch HTML → extract menu content → AI parse
+  4. Image → Anthropic Claude Vision → OCR → AI parse (ANTHROPIC_API_KEY)
+
+Output: Creates MenuCategory + MenuItem records in DB
+
+
+================================================================================
+12. REAL-TIME FEATURES (Future)
+================================================================================
+
+For MVP, polling every 30s is sufficient.
+Phase 2: Add WebSocket (socket.io) for:
+  - Live call status updates on dashboard
+  - Real-time order notifications
+  - Agent status changes
+
+
+================================================================================
+13. SECURITY ARCHITECTURE
+================================================================================
+
+Layer 1 — Route Obfuscation:
+  - Auth routes use long hash paths (/auth/login/<64-char-hash>)
+  - Hashes stored in .env, not hardcoded
+  - Any request to /auth/login without valid hash → 404
+
+Layer 2 — Rate Limiting:
+  - Auth routes: 5 requests / 15 min per IP
+  - API routes: 100 requests / 15 min per user
+  - Webhook routes: 50 requests / min
+
+Layer 3 — Input Validation:
+  - All request bodies validated with Zod schemas
+  - SQL injection prevented by Prisma (parameterized queries)
+  - XSS prevented by not rendering user HTML
+
+Layer 4 — Authentication:
+  - JWT access tokens (15 min, in memory)
+  - Refresh tokens (7 day, httpOnly cookie, rotated on use)
+  - bcryptjs password hashing (12 rounds)
+  - Optional 2FA via TOTP (authenticator app)
+
+Layer 5 — Security Headers:
+  - Helmet.js (HSTS, noSniff, CSP, etc.)
+  - CORS limited to FRONTEND_URL
+
+Layer 6 — Session Management:
+  - Track active sessions (device, IP, location)
+  - Allow users to revoke individual sessions
+  - Refresh token invalidation on password change
+
+
+================================================================================
+14. ENVIRONMENT VARIABLES
+================================================================================
+
+See .env file in backend/ root. Key vars:
+
+DATABASE_URL                → Neon PostgreSQL connection
+JWT_SECRET                  → HMAC secret for JWT signing
+ELEVENLABS_API_KEY          → Voice agent API
+STRIPE_SECRET_KEY           → Payment processing
+STRIPE_WEBHOOK_SECRET       → Verify Stripe webhooks
+RESEND_API_KEY              → Transactional email
+AUTH_LOGIN_HASH             → Secret path segment for login
+AUTH_REGISTER_HASH          → Secret path segment for register
+AGENT_WEBHOOK_SECRET        → Verify ElevenLabs webhooks
+BACKEND_URL                 → Public URL for webhook endpoints
+ANTHROPIC_API_KEY           → Claude Vision for menu image OCR
+
+
+================================================================================
+15. VERIFICATION & TESTING PLAN
+================================================================================
+
+Since this is a planning document (no code yet), testing will be done when
+we implement each module. The strategy is:
+
+Phase 1 — Auth Module:
+  - Register user, receive tokens
+  - Login, verify access token
+  - Refresh token rotation
+  - Password change invalidates sessions
+  - Rate limiting blocks excessive attempts
+  TEST: Use Postman/Thunder Client to hit auth endpoints
+
+Phase 2 — Business & Agent:
+  - Create business during onboarding
+  - Create ElevenLabs agent via API
+  - Update agent voice/script
+  - Verify agent appears in ElevenLabs dashboard
+  TEST: Check ElevenLabs dashboard for created agents
+
+Phase 3 — Menu, Orders, Reservations:
+  - Import menu from URL/PDF
+  - Verify parsed items match source
+  - Create order via API, verify DB record
+  - Create reservation, verify DB record
+  TEST: Compare imported menu items to source material
+
+Phase 4 — Billing:
+  - Create subscription with test card
+  - Verify Stripe customer + subscription created
+  - Cancel subscription, verify webhook updates DB
+  TEST: Use Stripe test mode with card 4242 4242 4242 4242
+
+Phase 5 — End-to-End:
+  - Complete full onboarding flow from frontend
+  - Verify all DB records created correctly
+  - Place test call via ElevenLabs, verify call log appears
+  TEST: Full walkthrough on localhost:5173 + localhost:5000
+
+Manual Testing (for user):
+  1. Start backend: cd backend && npm run dev
+  2. Start frontend: cd talkativ-expert-ui && npm run dev
+  3. Open http://localhost:5173
+  4. Click "Start free", complete onboarding
+  5. Check dashboard shows live data from DB
+  6. Navigate to Calls, Orders, Reservations — verify data loads
+  7. Go to Settings → change password → verify old sessions revoked
+  8. Go to Billing → verify Stripe integration
+
+
+================================================================================
+END OF IMPLEMENTATION PLAN
+================================================================================
+
+things to do add to the backend/eleven las....
+
+I think we should either use google cloud console or clerk fr authentication
+I also think in the setting of account as in the frontend where,the user kept thir business name and it roug out the result(supposedly it did a oogle search and return the nae and i think the address),lets also give user that teir business isnt in te web/oonline...so that means they can manuallly edit or ut in hter business na and other information
+Also in the section where they can uplooad their menu files or put in their business and it will scrape useful information such as menu list,opning hours and oters....We can do it that if it will scrape or extrct text frm their url...It will append what it got to avoid data redundancy or duplicate of text of files..(for example,lets say it upload menu  file and it has extracted pizza and in te scrape result from the url it saw pizza in it ,it won't add it it to th database because pizza already exist)
+Also like normal users can edit their menu,FAQ and others.....
+For the greeting message,we should give user the option to either use the default greeting message or edit it ...
+For the agent call....For reservation policies te agent shold ask questions such as party size,date and ask for ncessary information..And sould check if the table if free/available/taken...If the user makes a reservation te agent should inform the user if the table is available or not...If the table is not available he should inform the user which table is available,if the user is not still interested he should inform the user that the table is not available and ask if he wants to make a reservation and later cange hteir mind,te agent can update or cancle(for example,the user calls to make a resrvation of 4 and the agent reserved te table and later the user call and want to update his reservation wit is reservation to like a table of 6 tthe aent should check if the tale of 6 is available and if it is update the user reservation id and if it is not,the agent should let the user know so as to know if he want s to still maintain his reserved tale of 4 or cancle it)
+Also based on the business reservation policy in the settig,if the business requires a payment deposit per guest/person/table/reservation ,the agent should ask the user how many guests will be dining and then calculate the total deposit amount and then ask the user to make the payment by sending a payment link,so that the can pay and get a confirmation message...
+For orderig policies based on te busines settings,once a user calls and places ad order,e agent should ask if it will a colleectin(i,e will the user rcome to ick it up in te restaurant ) or delivery(i,e will the user want the order to be delivered to his location) nd based on the user location,the agent should calculate the radius from the restaurant to the user location,if it is witin the Radies of the busness in the ordering policy,if it is not the agent sould tell the user that the delivery is otside of their deleivery range and if it is within it sould ask how do they want to pay,if they want to pay now,or pay on delivery,if pay now if sould send a payment link and user can proceed with his/her payment
+For all confirmed payment eiter for ordering or reservtion,the business should be notified either through their integrations,otification email,businss email.....
+If the agent is asking the user is deatils like name,email,addres,nuber and he/she doesn't pronouce it well,the agent should ask the user to spell it out for him/her 
+Angent should e according to user settings and it must be nice,polite,respectful and professional
+
+
+
+ALso if tere is no live call,the dashoard c cange to no active call,but there is any active call it should change back and show tthat listen in
