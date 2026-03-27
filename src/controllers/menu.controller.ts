@@ -253,45 +253,87 @@ export const importFromPos = asyncHandler(async (req: Request, res: Response) =>
 
 export const listFaqs = asyncHandler(async (req: Request, res: Response) => {
   const businessId = await getBusinessId(req.user!.userId);
-  const faqs = await prisma.faq.findMany({
-    where: { businessId },
-    orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
-    select: { id: true, question: true, answer: true, position: true, createdAt: true },
+  const extraction = await prisma.businessExtraction.findFirst({
+    where: { businessId, category: 'faq' },
   });
+  const faqs = (extraction?.structuredData as any)?.faq || [];
   res.json(faqs);
 });
 
 export const createFaq = asyncHandler(async (req: Request, res: Response) => {
   const businessId = await getBusinessId(req.user!.userId);
-  const { question, answer } = req.body as { question: string; answer: string };
-  if (!question?.trim() || !answer?.trim()) throw ApiError.badRequest('question and answer are required');
-  const existing = await prisma.faq.findFirst({ where: { businessId, question: { equals: question.trim(), mode: 'insensitive' } } });
-  if (existing) throw ApiError.badRequest('A FAQ with the same question already exists');
-  const count = await prisma.faq.count({ where: { businessId } });
-  const faq = await prisma.faq.create({
-    data: { businessId, question: question.trim(), answer: answer.trim(), position: count },
+  const { question, answer } = req.body;
+  if (!question || !answer) throw ApiError.badRequest('Question and answer are required');
+
+  const extraction = await prisma.businessExtraction.findFirst({
+    where: { businessId, category: 'faq' },
   });
-  res.status(201).json(faq);
+
+  if (extraction) {
+    const existing = (extraction.structuredData as any)?.faq || [];
+    const duplicate = existing.find(
+      (f: any) => f.question.toLowerCase() === question.toLowerCase()
+    );
+    if (duplicate) throw ApiError.conflict('This FAQ already exists');
+
+    const updated = [...existing, { id: Date.now().toString(), question, answer }];
+    await prisma.businessExtraction.update({
+      where: { id: extraction.id },
+      data: { structuredData: { faq: updated } as any },
+    });
+    res.json({ id: Date.now().toString(), question, answer });
+  } else {
+    const newFaq = { id: Date.now().toString(), question, answer };
+    await prisma.businessExtraction.create({
+      data: {
+        businessId,
+        source: 'manual',
+        category: 'faq',
+        rawText: `Q: ${question}\nA: ${answer}`,
+        structuredData: { faq: [newFaq] } as any,
+      },
+    });
+    res.json(newFaq);
+  }
 });
 
 export const updateFaq = asyncHandler(async (req: Request, res: Response) => {
   const businessId = await getBusinessId(req.user!.userId);
   const { id } = req.params;
-  const { question, answer } = req.body as { question?: string; answer?: string };
-  const existing = await prisma.faq.findFirst({ where: { id, businessId } });
-  if (!existing) throw ApiError.notFound('FAQ not found');
-  const faq = await prisma.faq.update({
-    where: { id },
-    data: { ...(question && { question: question.trim() }), ...(answer && { answer: answer.trim() }) },
+  const { question, answer } = req.body;
+
+  const extraction = await prisma.businessExtraction.findFirst({
+    where: { businessId, category: 'faq' },
   });
-  res.json(faq);
+  if (!extraction) throw ApiError.notFound('No FAQs found');
+
+  const existing = (extraction.structuredData as any)?.faq || [];
+  const updated = existing.map((f: any) =>
+    f.id === id ? { ...f, question, answer } : f
+  );
+
+  await prisma.businessExtraction.update({
+    where: { id: extraction.id },
+    data: { structuredData: { faq: updated } as any },
+  });
+  res.json({ id, question, answer });
 });
 
 export const deleteFaq = asyncHandler(async (req: Request, res: Response) => {
   const businessId = await getBusinessId(req.user!.userId);
   const { id } = req.params;
-  const existing = await prisma.faq.findFirst({ where: { id, businessId } });
-  if (!existing) throw ApiError.notFound('FAQ not found');
-  await prisma.faq.delete({ where: { id } });
-  res.json({ deleted: true });
+
+  const extraction = await prisma.businessExtraction.findFirst({
+    where: { businessId, category: 'faq' },
+  });
+  if (!extraction) throw ApiError.notFound('No FAQs found');
+
+  const existing = (extraction.structuredData as any)?.faq || [];
+  const updated = existing.filter((f: any) => f.id !== id);
+
+  await prisma.businessExtraction.update({
+    where: { id: extraction.id },
+    data: { structuredData: { faq: updated } as any },
+  });
+  res.json({ message: 'FAQ deleted' });
 });

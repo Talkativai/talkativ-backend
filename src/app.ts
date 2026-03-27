@@ -24,6 +24,7 @@ import webhookRoutes from './routes/webhook.routes.js';
 import voicesRoutes from './routes/agent.routes.js';
 
 const app = express();
+app.set('trust proxy', 1);
 
 // ─── Global Middleware ───────────────────────────────────────────────────────
 app.use(helmet());
