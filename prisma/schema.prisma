@@ -90,6 +90,7 @@ model Business {
   reservationPolicy ReservationPolicy?
   staff             Staff[]
   extractions       BusinessExtraction[]
+  faqs              Faq[]
 }
 
 // ─── STAFF ───────────────────────────────────────────────────────────────────
@@ -122,6 +123,7 @@ model Agent {
   businessId        String   @unique
   elevenlabsAgentId String?
   name              String   @default("Aria")
+  gender            String   @default("female")
   voiceId           String   @default("21m00Tcm4TlvDq8ikWAM")
   voiceName         String   @default("Aria")
   voiceDescription  String   @default("Warm & professional")
@@ -134,6 +136,7 @@ model Agent {
   acceptOrders      Boolean  @default(true)
   takeReservations  Boolean  @default(true)
   answerAfterHours  Boolean  @default(true)
+  agentSchedule     Json?
   aiPhoneNumber     String?
   isActive          Boolean  @default(true)
   createdAt         DateTime @default(now())
@@ -385,6 +388,8 @@ model Integration {
   updatedAt  DateTime          @updatedAt
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, name])
 }
 
 enum IntegrationStatus {
@@ -450,6 +455,20 @@ model BusinessExtraction {
   rawText      String?
   structuredData Json?
   createdAt    DateTime @default(now())
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// ─── FAQ ─────────────────────────────────────────────────────────────────────
+
+model Faq {
+  id         String   @id @default(uuid())
+  businessId String
+  question   String
+  answer     String
+  position   Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }

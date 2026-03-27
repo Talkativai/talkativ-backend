@@ -136,6 +136,26 @@ export const deleteAgent = async (agentId: string) => {
   return true;
 };
 
+// ─── Text-to-Speech Preview ───────────────────────────────────────────────────
+
+export const textToSpeech = async (voiceId: string, text: string): Promise<Buffer> => {
+  const res = await fetch(`${BASE_URL}/text-to-speech/${voiceId}`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({
+      text,
+      model_id: 'eleven_monolingual_v1',
+      voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+    }),
+  });
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`ElevenLabs TTS failed: ${error}`);
+  }
+  const arrayBuffer = await res.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+};
+
 // ─── Voices ──────────────────────────────────────────────────────────────────
 
 export const listVoices = async () => {
@@ -157,12 +177,14 @@ export const buildSystemPrompt = (business: {
   type: string;
   address: string;
   openingHours: any;
+  agentSchedule?: any;
   agentName: string;
   transferNumber?: string;
   greeting: string;
 }) => {
-  const hoursStr = business.openingHours
-    ? Object.entries(business.openingHours)
+  const scheduleSource = business.agentSchedule || business.openingHours;
+  const hoursStr = scheduleSource
+    ? Object.entries(scheduleSource)
         .map(([day, hours]) => `${day}: ${hours}`)
         .join('\n')
     : 'Not specified';

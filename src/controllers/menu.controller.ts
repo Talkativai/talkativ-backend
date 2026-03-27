@@ -240,3 +240,48 @@ export const importFromPos = asyncHandler(async (req: Request, res: Response) =>
     categories,
   });
 });
+
+// ─── FAQ ─────────────────────────────────────────────────────────────────────
+
+export const listFaqs = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = await getBusinessId(req.user!.userId);
+  const faqs = await prisma.faq.findMany({
+    where: { businessId },
+    orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+    select: { id: true, question: true, answer: true, position: true, createdAt: true },
+  });
+  res.json(faqs);
+});
+
+export const createFaq = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = await getBusinessId(req.user!.userId);
+  const { question, answer } = req.body as { question: string; answer: string };
+  if (!question?.trim() || !answer?.trim()) throw ApiError.badRequest('question and answer are required');
+  const count = await prisma.faq.count({ where: { businessId } });
+  const faq = await prisma.faq.create({
+    data: { businessId, question: question.trim(), answer: answer.trim(), position: count },
+  });
+  res.status(201).json(faq);
+});
+
+export const updateFaq = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = await getBusinessId(req.user!.userId);
+  const { id } = req.params;
+  const { question, answer } = req.body as { question?: string; answer?: string };
+  const existing = await prisma.faq.findFirst({ where: { id, businessId } });
+  if (!existing) throw ApiError.notFound('FAQ not found');
+  const faq = await prisma.faq.update({
+    where: { id },
+    data: { ...(question && { question: question.trim() }), ...(answer && { answer: answer.trim() }) },
+  });
+  res.json(faq);
+});
+
+export const deleteFaq = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = await getBusinessId(req.user!.userId);
+  const { id } = req.params;
+  const existing = await prisma.faq.findFirst({ where: { id, businessId } });
+  if (!existing) throw ApiError.notFound('FAQ not found');
+  await prisma.faq.delete({ where: { id } });
+  res.json({ deleted: true });
+});

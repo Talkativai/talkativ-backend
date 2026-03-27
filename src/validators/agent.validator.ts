@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const updateAgentSchema = z.object({
   name: z.string().optional(),
+  gender: z.enum(['male', 'female']).optional(),
   voiceId: z.string().optional(),
   voiceName: z.string().optional(),
   voiceDescription: z.string().optional(),
@@ -13,6 +14,7 @@ export const updateAgentSchema = z.object({
   acceptOrders: z.boolean().optional(),
   takeReservations: z.boolean().optional(),
   answerAfterHours: z.boolean().optional(),
+  agentSchedule: z.record(z.string()).optional(),
   isActive: z.boolean().optional(),
 });
 

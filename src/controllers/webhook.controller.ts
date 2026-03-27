@@ -131,6 +131,19 @@ export const stripeWebhook = asyncHandler(async (req: Request, res: Response) =>
 
 export const catalogueLookup = asyncHandler(async (req: Request, res: Response) => {
   const { query, business_id } = req.body;
+
+  // Check if the business has any menu items at all
+  const totalItems = await prisma.menuItem.count({
+    where: { category: { businessId: business_id }, status: 'ACTIVE' },
+  });
+  if (totalItems === 0) {
+    res.json({
+      items: [],
+      message: "I'm sorry, our menu information isn't available right now. Please try again later or call us back during business hours.",
+    });
+    return;
+  }
+
   const items = await prisma.menuItem.findMany({
     where: {
       category: { businessId: business_id },
@@ -140,6 +153,21 @@ export const catalogueLookup = asyncHandler(async (req: Request, res: Response) 
     select: { name: true, description: true, price: true },
     take: 10,
   });
+
+  if (items.length === 0) {
+    // Also try searching by category name
+    const byCategory = await prisma.menuItem.findMany({
+      where: {
+        category: { businessId: business_id, name: { contains: query, mode: 'insensitive' } },
+        status: 'ACTIVE',
+      },
+      select: { name: true, description: true, price: true },
+      take: 10,
+    });
+    res.json({ items: byCategory });
+    return;
+  }
+
   res.json({ items });
 });
 
@@ -159,9 +187,27 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
   // Check business hours before accepting order
   const business = await prisma.business.findUnique({
     where: { id: business_id },
-    include: { orderingPolicy: true },
+    include: { orderingPolicy: true, integrations: true },
   });
-  if (!business) throw ApiError.notFound('Business not found');
+  if (!business) {
+    res.json({ error: true, message: "I'm sorry, our ordering service isn't available right now. Kindly try again later." });
+    return;
+  }
+
+  // Check if ordering integration is connected (Clover or Square)
+  const orderingIntegration = business.integrations?.find(
+    (i: any) => ['Clover', 'Square'].includes(i.name) && i.status === 'CONNECTED'
+  );
+  if (!orderingIntegration) {
+    // No POS connected — check if we have any menu to take orders from
+    const menuCount = await prisma.menuItem.count({
+      where: { category: { businessId: business_id }, status: 'ACTIVE' },
+    });
+    if (menuCount === 0) {
+      res.json({ error: true, message: "I'm sorry, our ordering service isn't available right now. Kindly try again later." });
+      return;
+    }
+  }
 
   if (business.openingHours) {
     const now = new Date();
@@ -293,9 +339,21 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
   // Check business hours before accepting reservation
   const business = await prisma.business.findUnique({
     where: { id: business_id },
-    include: { reservationPolicy: true },
+    include: { reservationPolicy: true, integrations: true },
   });
-  if (!business) throw ApiError.notFound('Business not found');
+  if (!business) {
+    res.json({ error: true, message: "I'm sorry, our reservation service isn't available right now. Kindly try again later." });
+    return;
+  }
+
+  // Check if reservation integration (renOS) is connected
+  const reservationIntegration = business.integrations?.find(
+    (i: any) => i.name === 'renOS' && i.status === 'CONNECTED'
+  );
+  if (!reservationIntegration) {
+    res.json({ error: true, message: "I'm sorry, our reservation service isn't currently connected. Kindly try again later or contact us directly to book a table." });
+    return;
+  }
 
   if (business.openingHours) {
     const reservationDate = new Date(date_time);

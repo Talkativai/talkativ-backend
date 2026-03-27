@@ -12,6 +12,8 @@ router.put('/', validate(updateAgentSchema), agentController.updateAgent);
 router.get('/transcripts', agentController.getTranscripts);
 router.get('/transcripts/:id', agentController.getTranscriptById);
 router.post('/test-call', agentController.testCall);
+router.get('/signed-url', agentController.getSignedUrl);
+router.post('/preview-voice', agentController.previewVoice);
 router.put('/voice', validate(updateVoiceSchema), agentController.updateVoice);
 router.put('/script', validate(updateScriptSchema), agentController.updateScript);
 router.put('/call-rules', validate(updateCallRulesSchema), agentController.updateCallRules);

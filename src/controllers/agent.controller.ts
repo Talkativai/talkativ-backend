@@ -4,6 +4,7 @@ import { ApiError } from '../utils/apiError.js';
 import prisma from '../config/db.js';
 import * as elevenlabs from '../services/elevenlabs.service.js';
 import { AVAILABLE_VOICES } from '../utils/constants.js';
+import { env } from '../config/env.js';
 
 const getBusinessId = async (userId: string) => {
   const business = await prisma.business.findUnique({ where: { userId } });
@@ -138,4 +139,28 @@ export const getTranscriptById = asyncHandler(async (req: Request, res: Response
 export const testCall = asyncHandler(async (req: Request, res: Response) => {
   // In production: trigger ElevenLabs outbound test call
   res.json({ message: 'Test call initiated', status: 'pending' });
+});
+
+export const getSignedUrl = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = await getBusinessId(req.user!.userId);
+  const agent = await prisma.agent.findUnique({ where: { businessId } });
+  if (!agent?.elevenlabsAgentId) throw ApiError.notFound('Agent not configured — complete onboarding first');
+
+  const r = await fetch(
+    `https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${agent.elevenlabsAgentId}`,
+    { headers: { 'xi-api-key': env.ELEVENLABS_API_KEY } }
+  );
+  if (!r.ok) {
+    const err = await r.text();
+    throw new Error(`ElevenLabs signed URL failed: ${err}`);
+  }
+  const { signed_url } = await r.json() as { signed_url: string };
+  res.json({ signedUrl: signed_url });
+});
+
+export const previewVoice = asyncHandler(async (req: Request, res: Response) => {
+  const { voiceId, text } = req.body as { voiceId: string; text: string };
+  if (!voiceId || !text) throw ApiError.badRequest('voiceId and text are required');
+  const audioBuffer = await elevenlabs.textToSpeech(voiceId, text.slice(0, 500));
+  res.json({ audio: audioBuffer.toString('base64') });
 });

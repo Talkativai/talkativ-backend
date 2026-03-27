@@ -12,17 +12,23 @@ const getBusinessId = async (userId: string) => {
 
 export const listIntegrations = asyncHandler(async (req: Request, res: Response) => {
   const businessId = await getBusinessId(req.user!.userId);
-  const integrations = await prisma.integration.findMany({ where: { businessId }, orderBy: { name: 'asc' } });
+  // Return only CONNECTED integrations for the main list
+  const integrations = await prisma.integration.findMany({
+    where: { businessId, status: 'CONNECTED' },
+    orderBy: { name: 'asc' },
+  });
   res.json(integrations);
 });
 
 export const connectIntegration = asyncHandler(async (req: Request, res: Response) => {
   const businessId = await getBusinessId(req.user!.userId);
-  const existing = await prisma.integration.findFirst({ where: { id: req.params.id, businessId } });
-  if (!existing) throw ApiError.notFound('Integration not found');
-  const integration = await prisma.integration.update({
-    where: { id: req.params.id },
-    data: { status: 'CONNECTED', config: req.body.config || {}, lastSynced: new Date() },
+  const { name, category, config } = req.body as { name: string; category: string; config?: Record<string, string> };
+  if (!name || !category) throw ApiError.badRequest('name and category are required');
+
+  const integration = await prisma.integration.upsert({
+    where: { businessId_name: { businessId, name } },
+    update: { status: 'CONNECTED', config: config || {}, lastSynced: new Date() },
+    create: { businessId, name, category, status: 'CONNECTED', config: config || {}, lastSynced: new Date() },
   });
   res.json(integration);
 });

@@ -28,4 +28,9 @@ router.post('/import/pdf', upload.single('file'), menuController.importFromPdf);
 router.post('/import/image', upload.single('file'), menuController.importFromImage);
 router.post('/import/pos', validate(importPosSchema), menuController.importFromPos);
 
+router.get('/faq', menuController.listFaqs);
+router.post('/faq', menuController.createFaq);
+router.put('/faq/:id', menuController.updateFaq);
+router.delete('/faq/:id', menuController.deleteFaq);
+
 export default router;

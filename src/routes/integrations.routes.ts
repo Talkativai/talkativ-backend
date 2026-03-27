@@ -6,7 +6,7 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/', integrationsController.listIntegrations);
-router.post('/:id/connect', integrationsController.connectIntegration);
+router.post('/connect', integrationsController.connectIntegration);
 router.delete('/:id/disconnect', integrationsController.disconnectIntegration);
 router.get('/:id/status', integrationsController.getIntegrationStatus);
 
