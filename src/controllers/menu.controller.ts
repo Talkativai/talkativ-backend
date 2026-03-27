@@ -50,7 +50,11 @@ export const getCategoryItems = asyncHandler(async (req: Request, res: Response)
 
 export const createCategory = asyncHandler(async (req: Request, res: Response) => {
   const businessId = await getBusinessId(req.user!.userId);
-  const category = await prisma.menuCategory.create({ data: { businessId, ...req.body } });
+  const { name } = req.body as { name: string };
+  if (!name?.trim()) throw ApiError.badRequest('Category name is required');
+  const existing = await prisma.menuCategory.findFirst({ where: { businessId, name: { equals: name.trim(), mode: 'insensitive' } } });
+  if (existing) throw ApiError.badRequest(`A category named "${name.trim()}" already exists`);
+  const category = await prisma.menuCategory.create({ data: { businessId, name: name.trim() } });
   res.status(201).json(category);
 });
 
@@ -65,7 +69,11 @@ export const deleteCategory = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const createItem = asyncHandler(async (req: Request, res: Response) => {
-  const item = await prisma.menuItem.create({ data: req.body });
+  const { categoryId, name, description, price } = req.body as { categoryId: string; name: string; description?: string; price: number };
+  if (!categoryId || !name?.trim()) throw ApiError.badRequest('categoryId and name are required');
+  const existing = await prisma.menuItem.findFirst({ where: { categoryId, name: { equals: name.trim(), mode: 'insensitive' } } });
+  if (existing) throw ApiError.badRequest(`An item named "${name.trim()}" already exists in this category`);
+  const item = await prisma.menuItem.create({ data: { categoryId, name: name.trim(), description: description?.trim() || null, price } });
   res.status(201).json(item);
 });
 
@@ -257,6 +265,8 @@ export const createFaq = asyncHandler(async (req: Request, res: Response) => {
   const businessId = await getBusinessId(req.user!.userId);
   const { question, answer } = req.body as { question: string; answer: string };
   if (!question?.trim() || !answer?.trim()) throw ApiError.badRequest('question and answer are required');
+  const existing = await prisma.faq.findFirst({ where: { businessId, question: { equals: question.trim(), mode: 'insensitive' } } });
+  if (existing) throw ApiError.badRequest('A FAQ with the same question already exists');
   const count = await prisma.faq.count({ where: { businessId } });
   const faq = await prisma.faq.create({
     data: { businessId, question: question.trim(), answer: answer.trim(), position: count },
