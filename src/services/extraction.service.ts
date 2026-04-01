@@ -209,7 +209,8 @@ async function saveExtractedDataToDb(
     let position = existingFaqs.length;
 
     for (const faq of data.faq) {
-      if (!faq.question || !faq.answer) continue;
+      // Skip FAQs missing either a question or a non-empty answer
+      if (!faq.question?.trim() || !faq.answer?.trim()) continue;
 
       if (existingQuestions.has(faq.question.toLowerCase())) {
         faqsDuplicated++;

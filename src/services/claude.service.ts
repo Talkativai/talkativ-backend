@@ -95,19 +95,39 @@ function parseClaudeResponse(text: string): CategorizedData {
 
 // ─── Scrape a URL and return clean text ─────────────────────────────────────
 export const scrapeAndAnalyzeUrl = async (url: string): Promise<string> => {
+  // Pass 1 — basic fetch + strip HTML
   const res = await fetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; TalkativBot/1.0)' },
   });
   if (!res.ok) throw new Error(`Failed to fetch URL: ${url} (${res.status})`);
 
   const html = await res.text();
-  return html
+  const rawText = html
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
     .replace(/<[^>]*>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .substring(0, 15000);
+
+  // Pass 2 — ask Claude to reconstruct Q&A pairs from the flat text
+  const message = await client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 4096,
+    messages: [{
+      role: 'user',
+      content:
+        `This text was scraped from ${url}. The page may be a FAQ page, menu page, or business info page. ` +
+        `Even if answers appear truncated or cut off, extract as much as you can. For FAQ pages specifically, ` +
+        `look for patterns like repeated question-like sentences followed by explanatory text and treat those ` +
+        `as Q&A pairs. Be aggressive in finding answers — they may appear as plain paragraph text after each ` +
+        `question heading.\n\nReturn the same text but with Q&A pairs clearly reconstructed where possible. ` +
+        `Preserve all other content verbatim.\n\nTEXT:\n"""\n${rawText}\n"""`,
+    }],
+  });
+
+  const enriched = message.content[0]?.type === 'text' ? message.content[0].text : rawText;
+  return enriched;
 };
 
 // ─── Categorize raw text (URL / DOCX) with Claude ───────────────────────────
@@ -123,7 +143,7 @@ export const categorizeExtractedData = async (
       content:
         `You are a restaurant data extraction AI. Analyze the following text extracted from a ${source} ` +
         `and categorize ALL the information you can find. Return ONLY valid JSON, no markdown, no code blocks.\n\n` +
-        `TEXT TO ANALYZE:\n"""\n${rawText.substring(0, 12000)}\n"""\n\n${SCHEMA_PROMPT}`,
+        `TEXT TO ANALYZE:\n"""\n${rawText.substring(0, 15000)}\n"""\n\n${SCHEMA_PROMPT}`,
     }],
   });
 
