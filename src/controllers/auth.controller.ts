@@ -15,15 +15,29 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
 
   // Hash password & create user
   const passwordHash = await authService.hashPassword(password);
-  const user = await prisma.user.create({
-    data: {
-      email,
-      passwordHash,
-      firstName,
-      lastName: lastName || '',
-      ...(googleId ? { googleId, emailVerified: true } : {}),
-    },
-  });
+
+  // Build the data object — only include googleId if actually provided
+  const userData: any = {
+    email,
+    passwordHash,
+    firstName,
+    lastName: lastName || '',
+  };
+
+  if (googleId) {
+    userData.googleId = googleId;
+    userData.emailVerified = true;
+  }
+
+  let user;
+  try {
+    user = await prisma.user.create({ data: userData });
+  } catch (err: any) {
+    if (err.code === 'P2002' && err.meta?.target?.includes('googleId')) {
+      throw ApiError.conflict('This Google account is already linked to another user');
+    }
+    throw err;
+  }
 
   // Create empty business shell (ignore errors — business may already exist)
   try {
@@ -107,16 +121,16 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response) => 
   const token = req.cookies?.refresh_token || req.body.refreshToken;
   if (!token) throw ApiError.unauthorized('No refresh token provided');
 
-  const tokens = await authService.rotateRefreshToken(token);
+  const result = await authService.rotateRefreshToken(token);
 
-  res.cookie('refresh_token', tokens.refreshToken, {
+  res.cookie('refresh_token', result.refreshToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'strict',
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 
-  res.json({ accessToken: tokens.accessToken });
+  res.json({ accessToken: result.accessToken, user: result.user });
 });
 
 export const logout = asyncHandler(async (req: Request, res: Response) => {
@@ -238,6 +252,8 @@ export const googleAuthCallback = asyncHandler(async (req: Request, res: Respons
   });
 
   const jwtTokens = await authService.generateTokenPair(user);
+
+  await authService.createSession(user.id, req.headers['user-agent'] || 'Unknown', req.ip || 'Unknown', 'Unknown');
 
   res.cookie('refresh_token', jwtTokens.refreshToken, {
     httpOnly: true,

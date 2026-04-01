@@ -6,6 +6,8 @@ import { env } from '../config/env.js';
 import stripe from '../config/stripe.js';
 import * as stripeService from '../services/stripe.service.js';
 import * as emailService from '../services/email.service.js';
+import * as posService from '../services/pos.service.js';
+import * as resosService from '../services/resos.service.js';
 
 // ─── ElevenLabs Webhook ──────────────────────────────────────────────────────
 export const elevenlabsWebhook = asyncHandler(async (req: Request, res: Response) => {
@@ -171,6 +173,85 @@ export const catalogueLookup = asyncHandler(async (req: Request, res: Response) 
   res.json({ items });
 });
 
+// Haversine formula
+function getDistanceFromLatLonInMiles(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 3958.8; // Radius of the earth in miles
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2)
+    ; 
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+  return R * c; // Distance in miles
+}
+
+const businessCoordsCache = new Map<string, {lat: number, lon: number}>();
+
+const geocode = async (address: string) => {
+  try {
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`, {
+      headers: { 'User-Agent': env.EMAIL_FROM || 'Talkativ-AI/1.0' }
+    });
+    const data = await response.json() as any[];
+    if (data && data.length > 0) {
+      return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), formatted: data[0].display_name };
+    }
+  } catch (e) {
+    console.error("Geocoding error", e);
+  }
+  return null;
+};
+
+const verifyDeliveryEligibility = async (business: any, customer_address: string) => {
+  if (!business || !business.address) return { eligible: false, message: "Business address not configured." };
+  
+  const deliveryRadius = business.orderingPolicy?.deliveryRadius || 5;
+
+  let bizCoords = businessCoordsCache.get(business.id);
+  if (!bizCoords) {
+    const bGeo = await geocode(business.address);
+    if (!bGeo) return { eligible: false, message: "Could not locate the restaurant on the map. Delivery unavailable." };
+    bizCoords = { lat: bGeo.lat, lon: bGeo.lon };
+    businessCoordsCache.set(business.id, bizCoords);
+  }
+
+  const custGeo = await geocode(customer_address);
+  if (!custGeo) return { eligible: false, message: "I couldn't find that address on the map. Could you please provide the street number and postcode again?" };
+
+  const distanceMiles = getDistanceFromLatLonInMiles(bizCoords.lat, bizCoords.lon, custGeo.lat, custGeo.lon);
+  
+  if (business.orderingPolicy?.deliveryRadiusUnit === 'km') {
+    const distanceKm = distanceMiles * 1.60934;
+    if (distanceKm > deliveryRadius) {
+      return { eligible: false, message: `This address is ${distanceKm.toFixed(1)} km away, which exceeds our ${deliveryRadius} km delivery radius. We cannot deliver here.` };
+    }
+  } else {
+    if (distanceMiles > deliveryRadius) {
+      return { eligible: false, message: `This address is ${distanceMiles.toFixed(1)} miles away, which exceeds our ${deliveryRadius} mile delivery radius. We cannot deliver here.` };
+    }
+  }
+
+  return { eligible: true, formatted_address: custGeo.formatted };
+};
+
+export const checkDeliveryAddress = asyncHandler(async (req: Request, res: Response) => {
+  const { business_id, customer_address } = req.body;
+  if (!business_id || !customer_address) {
+    res.json({ eligible: false, message: "Missing business_id or customer_address." });
+    return;
+  }
+
+  const business = await prisma.business.findUnique({
+    where: { id: business_id },
+    include: { orderingPolicy: true }
+  });
+
+  const eligibility = await verifyDeliveryEligibility(business, customer_address);
+  res.json(eligibility);
+});
+
 export const createOrder = asyncHandler(async (req: Request, res: Response) => {
   const {
     business_id,
@@ -182,16 +263,30 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
     allergies,
     payment_method, // "pay_now" or "pay_on_delivery"/"pay_on_collection"
     notes,
+    delivery_address,
   } = req.body;
 
   // Check business hours before accepting order
   const business = await prisma.business.findUnique({
     where: { id: business_id },
-    include: { orderingPolicy: true, integrations: true },
+    include: { orderingPolicy: true, integrations: true, notifSettings: true },
   });
   if (!business) {
     res.json({ error: true, message: "I'm sorry, our ordering service isn't available right now. Kindly try again later." });
     return;
+  }
+
+  // Hard block delivery orders missing an address
+  if (type?.toUpperCase() === 'DELIVERY') {
+    if (!delivery_address) {
+      res.json({ error: true, message: 'Delivery address is required for delivery orders. Please ask the customer for their full address.' });
+      return;
+    }
+    const eligibility = await verifyDeliveryEligibility(business, delivery_address);
+    if (!eligibility.eligible) {
+      res.json({ error: true, message: `Delivery address is invalid or out of allowed radius: ${eligibility.message}. Please inform the customer and offer collection instead.` });
+      return;
+    }
   }
 
   // Check if ordering integration is connected (Clover or Square)
@@ -246,14 +341,22 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
+  const orderType = type?.toUpperCase() || 'DELIVERY';
+  let deliveryFee = 0;
+  if (orderType === 'DELIVERY' && business.orderingPolicy?.deliveryFee) {
+    deliveryFee = Number(business.orderingPolicy.deliveryFee);
+    totalAmount += deliveryFee;
+  }
+
   const order = await prisma.order.create({
     data: {
       businessId: business_id,
       customerName: customer_name,
       customerPhone: customer_phone || null,
       customerEmail: customer_email || null,
+      deliveryAddress: delivery_address || null,
       items: items,
-      type: type?.toUpperCase() || 'DELIVERY',
+      type: orderType as any,
       amount: totalAmount,
       allergies: allergies || null,
       notes: notes || null,
@@ -262,6 +365,45 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
       status: 'PENDING',
     },
   });
+
+  // ── Push order to POS (Clover / Square) if integration is connected ──────────
+  if (orderingIntegration) {
+    try {
+      const parsedItems = posService.parseItemString(items);
+      // Resolve prices from DB for each item
+      const lineItems: posService.PosLineItem[] = [];
+      for (const parsed of parsedItems) {
+        const menuItem = await prisma.menuItem.findFirst({
+          where: { category: { businessId: business_id }, name: { contains: parsed.name, mode: 'insensitive' }, status: 'ACTIVE' },
+        });
+        lineItems.push({
+          name: parsed.name,
+          quantity: parsed.quantity,
+          unitPriceMinor: menuItem ? Math.round(Number(menuItem.price) * 100) : 0,
+        });
+      }
+
+      const posResult = await posService.pushOrderToPOS(orderingIntegration, {
+        ourOrderId: order.id,
+        customerName: customer_name,
+        customerPhone: customer_phone || null,
+        orderType: orderType as 'DELIVERY' | 'COLLECTION',
+        deliveryAddress: delivery_address || null,
+        notes: notes || null,
+        allergies: allergies || null,
+        lineItems,
+        currency: (business as any).currency || 'GBP',
+      });
+
+      if (posResult) {
+        await prisma.order.update({ where: { id: order.id }, data: { posOrderId: posResult.posOrderId } });
+        console.log(`[POS] Order pushed to ${posResult.posSystem} — POS ID: ${posResult.posOrderId}`);
+      }
+    } catch (posErr) {
+      // Non-fatal — order is saved in our DB, POS push is best-effort
+      console.error('[POS] Failed to push order to POS:', posErr);
+    }
+  }
 
   let paymentLink = null;
 
@@ -297,6 +439,7 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
               <p>Hi ${customer_name},</p>
               <p>Thank you for your order! Your total is <strong>£${totalAmount.toFixed(2)}</strong>.</p>
               <p><strong>Order details:</strong> ${items}</p>
+              ${deliveryFee > 0 ? `<p><strong>Delivery Fee:</strong> £${deliveryFee.toFixed(2)}</p>` : ''}
               ${allergies ? `<p><strong>⚠️ Allergies noted:</strong> ${allergies}</p>` : ''}
               <p>Please complete your payment using the link below:</p>
               <p><a href="${env.FRONTEND_URL}/payment?pi=${paymentIntent.client_secret}">Pay now →</a></p>
@@ -315,6 +458,26 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
   const allergyWarning = allergies
     ? `\n⚠️ ALLERGY ALERT: Customer has reported the following allergies: ${allergies}. Please ensure all items are safe and inform kitchen staff.`
     : '';
+
+  // Send business notification email
+  if (business.notifSettings?.emailNewOrder !== false && business.email) {
+    emailService.sendBusinessNewOrderAlert(business.email, business.name, {
+      id: order.id,
+      type: order.type,
+      customerName: customer_name,
+      customerPhone: customer_phone,
+      customerEmail: customer_email,
+      deliveryAddress: delivery_address,
+      items: items,
+      notes: notes,
+      allergies: allergies,
+      subtotal: totalAmount - deliveryFee,
+      deliveryFee: deliveryFee,
+      total: totalAmount,
+      paymentMethod: payment_method || 'pay_on_delivery',
+      paymentStatus: 'pending'
+    }).catch(err => console.error('Failed to send business new order alert:', err));
+  }
 
   res.json({
     order_id: order.id,
@@ -339,16 +502,16 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
   // Check business hours before accepting reservation
   const business = await prisma.business.findUnique({
     where: { id: business_id },
-    include: { reservationPolicy: true, integrations: true },
+    include: { reservationPolicy: true, integrations: true, notifSettings: true },
   });
   if (!business) {
     res.json({ error: true, message: "I'm sorry, our reservation service isn't available right now. Kindly try again later." });
     return;
   }
 
-  // Check if reservation integration (renOS) is connected
+  // Check if reservation integration (resOS) is connected
   const reservationIntegration = business.integrations?.find(
-    (i: any) => i.name === 'renOS' && i.status === 'CONNECTED'
+    (i: any) => i.name === 'resOS' && i.status === 'CONNECTED'
   );
   if (!reservationIntegration) {
     res.json({ error: true, message: "I'm sorry, our reservation service isn't currently connected. Kindly try again later or contact us directly to book a table." });
@@ -460,6 +623,48 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
     } else {
       depositMessage += `Please provide your email so we can send you the payment link.`;
     }
+  }
+
+  // ── Push to resOS if connected ────────────────────────────────────────────
+  if (reservationIntegration) {
+    const config = reservationIntegration.config as any;
+    if (config?.apiKey && config?.propertyId) {
+      const resosResult = await resosService.createResOSReservation(
+        config.apiKey,
+        config.propertyId,
+        {
+          guestName: guest_name,
+          guestPhone: guest_phone || null,
+          guestEmail: guest_email || null,
+          guests,
+          dateTime: date_time,
+          notes: depositMessage || null,
+        }
+      );
+
+      if (resosResult.success && resosResult.reservationId) {
+        await prisma.reservation.update({
+          where: { id: reservation.id },
+          data: { externalId: resosResult.reservationId },
+        });
+        console.log(`[resOS] Reservation pushed — resOS ID: ${resosResult.reservationId}`);
+      } else {
+        console.error('[resOS] Push failed but reservation saved locally:', resosResult.message);
+      }
+    }
+  }
+
+  // Send business notification email
+  if (business.notifSettings?.emailNewReservation !== false && business.email) {
+    emailService.sendBusinessNewReservationAlert(business.email, business.name, {
+      id: reservation.id,
+      guestName: guest_name,
+      guestPhone: guest_phone,
+      guestEmail: guest_email,
+      guests: guests,
+      dateTime: new Date(date_time),
+      depositStatus: (depositRequired && actualDeposit > 0) ? 'Pending payment' : 'No deposit required'
+    }).catch(err => console.error('Failed to send business reservation alert:', err));
   }
 
   res.json({

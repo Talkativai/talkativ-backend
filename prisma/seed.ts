@@ -62,6 +62,8 @@ async function main() {
       phone: '+44 161 234 5678',
       email: 'info@tonyspizzeria.co.uk',
       website: 'https://tonyspizzeria.co.uk',
+      country: 'United Kingdom',
+      currency: 'GBP',
       primaryLanguage: 'en',
       timezone: 'Europe/London',
       openingHours: {

@@ -81,7 +81,7 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
   // Send security alert email with recovery link
   const resetToken = crypto.randomBytes(32).toString('hex');
   const recoveryUrl = `${process.env.APP_URL || 'http://localhost:3000'}/reset-password?token=${resetToken}`;
-  emailService.sendPasswordChangeAlert(user.email, user.firstName, recoveryUrl).catch(() => {});
+  emailService.sendPasswordChangeAlert(user.email, user.firstName, recoveryUrl).catch(err => console.error('[Email] sendPasswordChangeAlert failed:', err));
 
   res.json({ message: 'Password changed. All sessions have been revoked.' });
 });
@@ -108,7 +108,7 @@ export const revokeSession = asyncHandler(async (req: Request, res: Response) =>
 export const getOrderingPolicy = asyncHandler(async (req: Request, res: Response) => {
   const businessId = await getBusinessId(req.user!.userId);
   const policy = await prisma.orderingPolicy.findUnique({ where: { businessId } });
-  res.json(policy || { deliveryEnabled: true, collectionEnabled: true, deliveryRadius: 5, minOrderAmount: 0, payNowEnabled: true, payOnDelivery: true });
+  res.json(policy || { deliveryEnabled: false, collectionEnabled: false, deliveryRadius: 5, deliveryRadiusUnit: 'miles', minOrderAmount: 0, payNowEnabled: true, payOnDelivery: true, collectionPayNow: false, collectionPayOnPickup: false, deliveryPayNow: false, deliveryPayOnDelivery: false, deliveryFee: 0 });
 });
 
 export const updateOrderingPolicy = asyncHandler(async (req: Request, res: Response) => {
@@ -148,6 +148,7 @@ export const getStaff = asyncHandler(async (req: Request, res: Response) => {
       username: true,
       firstName: true,
       lastName: true,
+      email: true,
       role: true,
       createdAt: true,
       updatedAt: true,
@@ -159,7 +160,7 @@ export const getStaff = asyncHandler(async (req: Request, res: Response) => {
 
 export const createStaff = asyncHandler(async (req: Request, res: Response) => {
   const businessId = await getBusinessId(req.user!.userId);
-  const { firstName, lastName, role } = req.body;
+  const { firstName, lastName, email, role } = req.body;
 
   // Auto-generate unique username: firstname.lastname + 4 random digits
   const base = `${firstName.toLowerCase().replace(/[^a-z0-9]/g, '')}.${lastName.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
@@ -179,9 +180,17 @@ export const createStaff = asyncHandler(async (req: Request, res: Response) => {
   const passwordHash = await authService.hashPassword(password);
 
   const staff = await prisma.staff.create({
-    data: { businessId, username, passwordHash, firstName, lastName, role: role || 'STAFF' },
-    select: { id: true, username: true, firstName: true, lastName: true, role: true, createdAt: true },
+    data: { businessId, username, passwordHash, firstName, lastName, email: email || null, role: role || 'STAFF' },
+    select: { id: true, username: true, firstName: true, lastName: true, email: true, role: true, createdAt: true },
   });
+
+  // Send credentials to staff email if provided
+  if (email) {
+    const business = await prisma.business.findUnique({ where: { id: businessId }, select: { name: true } });
+    emailService.sendStaffCredentials(email, firstName, business?.name || 'your business', username, password)
+      .then(result => console.log('[Staff email] sent ok:', result))
+      .catch(err => console.error('[Staff email] FAILED:', err));
+  }
 
   // Return plain password once
   res.status(201).json({ ...staff, plainPassword: password });

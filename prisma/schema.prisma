@@ -7,32 +7,25 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ─── USER & AUTH ─────────────────────────────────────────────────────────────
-
 model User {
-  id               String    @id @default(uuid())
-  email            String    @unique
+  id               String         @id @default(uuid())
+  email            String         @unique
   passwordHash     String?
   firstName        String
   lastName         String
-  role             Role      @default(OWNER)
-  googleId         String?   @unique
-  twoFactorEnabled Boolean   @default(false)
+  role             Role           @default(OWNER)
+  twoFactorEnabled Boolean        @default(false)
   twoFactorSecret  String?
-  emailVerified    Boolean   @default(false)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  emailVerified    Boolean        @default(false)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  googleId         String?
+  business         Business?
+  otpTokens        OtpToken[]
+  refreshTokens    RefreshToken[]
+  sessions         Session[]
 
-  business      Business?
-  sessions      Session[]
-  refreshTokens RefreshToken[]
-  otpTokens     OtpToken[]
-}
-
-enum Role {
-  OWNER
-  MANAGER
-  STAFF
+  @@index([googleId])
 }
 
 model Session {
@@ -43,8 +36,7 @@ model Session {
   ip         String
   lastActive DateTime @default(now())
   createdAt  DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model RefreshToken {
@@ -53,47 +45,43 @@ model RefreshToken {
   userId    String
   expiresAt DateTime
   createdAt DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
-
-// ─── BUSINESS ────────────────────────────────────────────────────────────────
 
 model Business {
-  id              String   @id @default(uuid())
-  userId          String   @unique
-  name            String
-  type            String
-  address         String
-  phone           String
-  email           String?
-  website         String?
-  primaryLanguage String   @default("en")
-  timezone        String   @default("Europe/London")
-  openingHours    Json?
-  onboardingStep  Int      @default(0)
-  onboardingDone  Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  user              User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                String                @id @default(uuid())
+  userId            String                @unique
+  name              String
+  type              String
+  address           String
+  phone             String
+  email             String?
+  website           String?
+  primaryLanguage   String                @default("en")
+  timezone          String                @default("Europe/London")
+  openingHours      Json?
+  onboardingStep    Int                   @default(0)
+  onboardingDone    Boolean               @default(false)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  country           String                @default("")
+  currency          String                @default("GBP")
   agent             Agent?
-  menuCategories    MenuCategory[]
+  user              User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  extractions       BusinessExtraction[]
   calls             Call[]
-  orders            Order[]
-  reservations      Reservation[]
+  faqs              Faq[]
   integrations      Integration[]
-  subscription      Subscription?
-  phoneConfig       PhoneConfig?
+  menuCategories    MenuCategory[]
   notifSettings     NotificationSettings?
+  orders            Order[]
   orderingPolicy    OrderingPolicy?
+  phoneConfig       PhoneConfig?
+  reservations      Reservation[]
   reservationPolicy ReservationPolicy?
   staff             Staff[]
-  extractions       BusinessExtraction[]
-  faqs              Faq[]
+  subscription      Subscription?
 }
-
-// ─── STAFF ───────────────────────────────────────────────────────────────────
 
 model Staff {
   id           String    @id @default(uuid())
@@ -105,25 +93,17 @@ model Staff {
   role         StaffRole @default(STAFF)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
-
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  email        String?
+  business     Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@unique([businessId, username])
 }
-
-enum StaffRole {
-  MANAGER
-  STAFF
-}
-
-// ─── AI AGENT (ElevenLabs) ───────────────────────────────────────────────────
 
 model Agent {
   id                String   @id @default(uuid())
   businessId        String   @unique
   elevenlabsAgentId String?
   name              String   @default("Aria")
-  gender            String   @default("female")
   voiceId           String   @default("21m00Tcm4TlvDq8ikWAM")
   voiceName         String   @default("Aria")
   voiceDescription  String   @default("Warm & professional")
@@ -135,32 +115,27 @@ model Agent {
   takeMessages      Boolean  @default(true)
   acceptOrders      Boolean  @default(true)
   takeReservations  Boolean  @default(true)
-  answerAfterHours  Boolean  @default(true)
-  agentSchedule     Json?
+  answerAfterHours  Boolean  @default(false)
   aiPhoneNumber     String?
   isActive          Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
-
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  agentSchedule     Json?
+  gender            String   @default("female")
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
-
-// ─── PHONE CONFIG ────────────────────────────────────────────────────────────
 
 model PhoneConfig {
   id                String   @id @default(uuid())
   businessId        String   @unique
   forwardNumber     String?
   ringsBeforeAi     Int      @default(0)
-  callRecording     Boolean  @default(true)
-  voicemailFallback Boolean  @default(false)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
-
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  callRecording     Boolean  @default(true)
+  voicemailFallback Boolean  @default(false)
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
-
-// ─── NOTIFICATION SETTINGS ───────────────────────────────────────────────────
 
 model NotificationSettings {
   id                    String   @id @default(uuid())
@@ -170,51 +145,49 @@ model NotificationSettings {
   emailDailySummary     Boolean  @default(true)
   pushLiveCall          Boolean  @default(true)
   pushNewOrder          Boolean  @default(true)
-  emailNewReservation   Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
   emailAgentOffline     Boolean  @default(true)
+  emailNewReservation   Boolean  @default(true)
   emailPaymentProcessed Boolean  @default(true)
   emailRefundRequest    Boolean  @default(true)
   emailWeeklyReport     Boolean  @default(true)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business              Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
-
-// ─── ORDERING POLICY ─────────────────────────────────────────────────────────
 
 model OrderingPolicy {
-  id                String   @id @default(uuid())
-  businessId        String   @unique
-  deliveryEnabled   Boolean  @default(true)
-  collectionEnabled Boolean  @default(true)
-  deliveryRadius    Float    @default(5.0)
-  deliveryRadiusUnit String  @default("miles")
-  minOrderAmount    Float    @default(0)
-  payNowEnabled     Boolean  @default(true)
-  payOnDelivery     Boolean  @default(true)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  id                    String   @id @default(uuid())
+  businessId            String   @unique
+  deliveryEnabled       Boolean  @default(false)
+  collectionEnabled     Boolean  @default(false)
+  deliveryRadius        Float    @default(5.0)
+  deliveryRadiusUnit    String   @default("miles")
+  minOrderAmount        Float    @default(0)
+  payNowEnabled         Boolean  @default(true)
+  payOnDelivery         Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  collectionPayNow      Boolean  @default(false)
+  collectionPayOnPickup Boolean  @default(false)
+  deliveryFee           Float    @default(0)
+  deliveryPayNow        Boolean  @default(false)
+  deliveryPayOnDelivery Boolean  @default(false)
+  business              Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
 
-// ─── RESERVATION POLICY ─────────────────────────────────────────────────────
-
 model ReservationPolicy {
-  id               String      @id @default(uuid())
-  businessId       String      @unique
-  depositRequired  Boolean     @default(false)
-  depositAmount    Float       @default(0)
-  depositType      DepositType @default(PER_GUEST)
-  maxPartySize     Int         @default(20)
-  bookingLeadTime  Int         @default(24)
-  cancellationHours Int        @default(24)
-  refundPercentage Int         @default(100)
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
-
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  id                String      @id @default(uuid())
+  businessId        String      @unique
+  depositRequired   Boolean     @default(false)
+  depositAmount     Float       @default(0)
+  depositType       DepositType @default(PER_GUEST)
+  maxPartySize      Int         @default(20)
+  bookingLeadTime   Int         @default(24)
+  cancellationHours Int         @default(24)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  refundPercentage  Int         @default(100)
+  business          Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
 
 model OtpToken {
@@ -224,17 +197,8 @@ model OtpToken {
   expiresAt DateTime
   used      Boolean  @default(false)
   createdAt DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
-
-enum DepositType {
-  PER_GUEST
-  PER_TABLE
-  FIXED
-}
-
-// ─── CALLS ───────────────────────────────────────────────────────────────────
 
 model Call {
   id               String       @id @default(uuid())
@@ -252,9 +216,160 @@ model Call {
   startedAt        DateTime     @default(now())
   endedAt          DateTime?
   createdAt        DateTime     @default(now())
+  business         Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  order            Order?
+}
 
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  order    Order?
+model Order {
+  id              String      @id @default(uuid())
+  businessId      String
+  callId          String?     @unique
+  customerName    String
+  items           String
+  itemsJson       Json?
+  type            OrderType   @default(DELIVERY)
+  status          OrderStatus @default(PENDING)
+  amount          Decimal
+  notes           String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  allergies       String?
+  customerEmail   String?
+  customerPhone   String?
+  deliveryAddress String?
+  paymentIntentId String?
+  paymentMethod   String?     @default("pay_on_delivery")
+  paymentStatus   String?     @default("pending")
+  posOrderId      String?
+  business        Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  call            Call?       @relation(fields: [callId], references: [id])
+}
+
+model Reservation {
+  id                     String            @id @default(uuid())
+  businessId             String
+  guestName              String
+  guestPhone             String?
+  guests                 Int
+  dateTime               DateTime
+  status                 ReservationStatus @default(PENDING)
+  note                   String?
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+  depositAmount          Decimal?          @default(0)
+  depositPaid            Boolean           @default(false)
+  depositPaymentIntentId String?
+  depositRequired        Boolean           @default(false)
+  guestEmail             String?
+  externalId             String?
+  business               Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+model MenuCategory {
+  id         String     @id @default(uuid())
+  businessId String
+  name       String
+  sortOrder  Int        @default(0)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  business   Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  items      MenuItem[]
+}
+
+model MenuItem {
+  id          String         @id @default(uuid())
+  categoryId  String
+  name        String
+  description String?
+  price       Decimal
+  status      MenuItemStatus @default(ACTIVE)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  category    MenuCategory   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+}
+
+model Integration {
+  id         String            @id @default(uuid())
+  businessId String
+  name       String
+  category   String
+  status     IntegrationStatus @default(AVAILABLE)
+  config     Json?
+  lastSynced DateTime?
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+  business   Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, name])
+}
+
+model Subscription {
+  id                   String             @id @default(uuid())
+  businessId           String             @unique
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  plan                 PlanType           @default(STARTER)
+  status               SubscriptionStatus @default(TRIALING)
+  trialEndsAt          DateTime?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  invoices             Invoice[]
+  business             Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+model Invoice {
+  id              String       @id @default(uuid())
+  subscriptionId  String
+  stripeInvoiceId String?
+  amount          Decimal
+  status          String
+  paidAt          DateTime?
+  periodStart     DateTime
+  periodEnd       DateTime
+  createdAt       DateTime     @default(now())
+  subscription    Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+}
+
+model BusinessExtraction {
+  id             String   @id @default(uuid())
+  businessId     String
+  source         String
+  sourceRef      String?
+  category       String
+  rawText        String?
+  structuredData Json?
+  createdAt      DateTime @default(now())
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+model Faq {
+  id         String   @id @default(uuid())
+  businessId String
+  question   String
+  answer     String
+  position   Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+enum Role {
+  OWNER
+  MANAGER
+  STAFF
+}
+
+enum StaffRole {
+  MANAGER
+  STAFF
+}
+
+enum DepositType {
+  PER_GUEST
+  PER_TABLE
+  FIXED
 }
 
 enum CallStatus {
@@ -271,32 +386,6 @@ enum OutcomeType {
   RESERVATION
 }
 
-// ─── ORDERS ──────────────────────────────────────────────────────────────────
-
-model Order {
-  id               String      @id @default(uuid())
-  businessId       String
-  callId           String?     @unique
-  customerName     String
-  customerPhone    String?
-  customerEmail    String?
-  items            String
-  itemsJson        Json?
-  type             OrderType   @default(DELIVERY)
-  status           OrderStatus @default(PENDING)
-  amount           Decimal
-  allergies        String?
-  notes            String?
-  paymentMethod    String?     @default("pay_on_delivery")
-  paymentStatus    String?     @default("pending")
-  paymentIntentId  String?
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
-
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  call     Call?    @relation(fields: [callId], references: [id])
-}
-
 enum OrderType {
   DELIVERY
   COLLECTION
@@ -311,28 +400,6 @@ enum OrderStatus {
   CANCELLED
 }
 
-// ─── RESERVATIONS ────────────────────────────────────────────────────────────
-
-model Reservation {
-  id                    String            @id @default(uuid())
-  businessId            String
-  guestName             String
-  guestPhone            String?
-  guestEmail            String?
-  guests                Int
-  dateTime              DateTime
-  status                ReservationStatus @default(PENDING)
-  note                  String?
-  depositRequired       Boolean           @default(false)
-  depositAmount         Decimal?          @default(0)
-  depositPaymentIntentId String?
-  depositPaid           Boolean           @default(false)
-  createdAt             DateTime          @default(now())
-  updatedAt             DateTime          @updatedAt
-
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-}
-
 enum ReservationStatus {
   PENDING
   CONFIRMED
@@ -341,80 +408,16 @@ enum ReservationStatus {
   COMPLETED
 }
 
-// ─── MENU ────────────────────────────────────────────────────────────────────
-
-model MenuCategory {
-  id         String   @id @default(uuid())
-  businessId String
-  name       String
-  sortOrder  Int      @default(0)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  business Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  items    MenuItem[]
-}
-
-model MenuItem {
-  id          String         @id @default(uuid())
-  categoryId  String
-  name        String
-  description String?
-  price       Decimal
-  status      MenuItemStatus @default(ACTIVE)
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-
-  category MenuCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-}
-
 enum MenuItemStatus {
   ACTIVE
   INACTIVE
   OUT_OF_STOCK
 }
 
-// ─── INTEGRATIONS ────────────────────────────────────────────────────────────
-
-model Integration {
-  id         String            @id @default(uuid())
-  businessId String
-  name       String
-  category   String
-  status     IntegrationStatus @default(AVAILABLE)
-  config     Json?
-  lastSynced DateTime?
-  createdAt  DateTime          @default(now())
-  updatedAt  DateTime          @updatedAt
-
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-
-  @@unique([businessId, name])
-}
-
 enum IntegrationStatus {
   AVAILABLE
   CONNECTED
   ERROR
-}
-
-// ─── BILLING (Stripe) ────────────────────────────────────────────────────────
-
-model Subscription {
-  id                   String             @id @default(uuid())
-  businessId           String             @unique
-  stripeCustomerId     String?
-  stripeSubscriptionId String?
-  plan                 PlanType           @default(STARTER)
-  status               SubscriptionStatus @default(TRIALING)
-  trialEndsAt          DateTime?
-  currentPeriodEnd     DateTime?
-  cancelAtPeriodEnd    Boolean            @default(false)
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
-
-  business Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  invoices Invoice[]
 }
 
 enum PlanType {
@@ -428,47 +431,4 @@ enum SubscriptionStatus {
   PAST_DUE
   CANCELLED
   PAUSED
-}
-
-model Invoice {
-  id              String   @id @default(uuid())
-  subscriptionId  String
-  stripeInvoiceId String?
-  amount          Decimal
-  status          String
-  paidAt          DateTime?
-  periodStart     DateTime
-  periodEnd       DateTime
-  createdAt       DateTime @default(now())
-
-  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-}
-
-// ─── BUSINESS EXTRACTION (AI categorized data) ──────────────────────────────
-
-model BusinessExtraction {
-  id           String   @id @default(uuid())
-  businessId   String
-  source       String                // "url", "pdf", "image"
-  sourceRef    String?               // URL or filename
-  category     String                // "menu", "hours", "contact", "summary", "other"
-  rawText      String?
-  structuredData Json?
-  createdAt    DateTime @default(now())
-
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-}
-
-// ─── FAQ ─────────────────────────────────────────────────────────────────────
-
-model Faq {
-  id         String   @id @default(uuid())
-  businessId String
-  question   String
-  answer     String
-  position   Int      @default(0)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
