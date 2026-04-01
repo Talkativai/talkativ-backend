@@ -209,6 +209,8 @@ async function saveExtractedDataToDb(
     let position = existingFaqs.length;
 
     for (const faq of data.faq) {
+      if (!faq.question || !faq.answer) continue;
+
       if (existingQuestions.has(faq.question.toLowerCase())) {
         faqsDuplicated++;
         continue;
