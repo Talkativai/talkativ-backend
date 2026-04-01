@@ -158,9 +158,31 @@ export const getSignedUrl = asyncHandler(async (req: Request, res: Response) => 
   res.json({ signedUrl: signed_url });
 });
 
-export const previewVoice = asyncHandler(async (req: Request, res: Response) => {
+export const previewVoice = async (req: Request, res: Response) => {
   const { voiceId, text } = req.body as { voiceId: string; text: string };
-  if (!voiceId || !text) throw ApiError.badRequest('voiceId and text are required');
-  const audioBuffer = await elevenlabs.textToSpeech(voiceId, text.slice(0, 500));
-  res.json({ audio: audioBuffer.toString('base64') });
-});
+  if (!voiceId || !text) {
+    res.status(400).json({ error: 'voiceId and text are required' });
+    return;
+  }
+  try {
+    const audioBuffer = await elevenlabs.textToSpeech(voiceId, text.slice(0, 500));
+    res.json({ audio: audioBuffer.toString('base64') });
+  } catch (err: any) {
+    const raw = err?.message || '';
+    console.error('[previewVoice] ElevenLabs error:', raw);
+
+    let userMessage = 'Voice preview is currently unavailable.';
+
+    if (raw.includes('detected_unusual_activity')) {
+      userMessage = 'ElevenLabs free tier is restricted on this account. Please upgrade to a paid ElevenLabs plan to use voice preview.';
+    } else if (raw.includes('401') || raw.toLowerCase().includes('invalid_api_key') || raw.toLowerCase().includes('unauthorized')) {
+      userMessage = 'ElevenLabs API key is invalid — check ELEVENLABS_API_KEY in your .env file.';
+    } else if (raw.includes('429')) {
+      userMessage = 'ElevenLabs rate limit reached — try again in a moment.';
+    } else if (raw.includes('422')) {
+      userMessage = 'This voice is not available on your ElevenLabs plan.';
+    }
+
+    res.status(400).json({ error: userMessage });
+  }
+};

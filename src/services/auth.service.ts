@@ -43,22 +43,27 @@ export const generateTokenPair = async (user: { id: string; email: string; role:
   return { accessToken, refreshToken };
 };
 
-export const rotateRefreshToken = async (oldToken: string): Promise<TokenPair> => {
+export const rotateRefreshToken = async (oldToken: string): Promise<TokenPair & { user: { id: string; email: string; firstName: string; lastName: string; role: string } }> => {
   const stored = await prisma.refreshToken.findUnique({ where: { token: oldToken } });
   if (!stored) throw ApiError.unauthorized('Invalid refresh token');
   if (stored.expiresAt < new Date()) {
-    await prisma.refreshToken.delete({ where: { id: stored.id } });
+    await prisma.refreshToken.deleteMany({ where: { id: stored.id } });
     throw ApiError.unauthorized('Refresh token expired');
   }
 
   const user = await prisma.user.findUnique({ where: { id: stored.userId } });
   if (!user) throw ApiError.unauthorized('User not found');
 
-  // Delete old token
-  await prisma.refreshToken.delete({ where: { id: stored.id } });
+  // Delete old token — use deleteMany so a duplicate concurrent request doesn't crash
+  const deleted = await prisma.refreshToken.deleteMany({ where: { id: stored.id } });
+  if (deleted.count === 0) throw ApiError.unauthorized('Refresh token already used');
 
-  // Generate new pair
-  return generateTokenPair(user);
+  // Generate new pair and return with fresh user data
+  const tokens = await generateTokenPair(user);
+  return {
+    ...tokens,
+    user: { id: user.id, email: user.email, firstName: user.firstName || '', lastName: user.lastName || '', role: user.role },
+  };
 };
 
 export const revokeAllUserTokens = async (userId: string): Promise<void> => {
@@ -67,7 +72,12 @@ export const revokeAllUserTokens = async (userId: string): Promise<void> => {
 
 // ─── Sessions ────────────────────────────────────────────────────────────────
 export const createSession = async (userId: string, device: string, ip: string, location: string) => {
-  return prisma.session.create({
-    data: { userId, device, ip, location },
-  });
+  const existing = await prisma.session.findFirst({ where: { userId, device } });
+  if (existing) {
+    return prisma.session.update({
+      where: { id: existing.id },
+      data: { ip, location, lastActive: new Date() },
+    });
+  }
+  return prisma.session.create({ data: { userId, device, ip, location } });
 };

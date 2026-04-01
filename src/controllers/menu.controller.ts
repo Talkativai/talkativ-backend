@@ -3,10 +3,16 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/apiError.js';
 import prisma from '../config/db.js';
 import * as extractionService from '../services/extraction.service.js';
-import type { CategorizedData } from '../services/groq.service.js';
+import type { CategorizedData } from '../services/claude.service.js';
 import type { PosSystem } from '../validators/menu.validator.js';
 
-const buildCategorizedResponse = (categorized: CategorizedData, created: number, skipped: number) => {
+const buildCategorizedResponse = (
+  categorized: CategorizedData,
+  created: number,
+  skipped: number,
+  faqsCreated: number,
+  faqsDuplicated: number
+) => {
   const menuCats = categorized.menu?.categories || [];
   return {
     menu: {
@@ -18,7 +24,12 @@ const buildCategorizedResponse = (categorized: CategorizedData, created: number,
     },
     hours: { found: !!categorized.hours },
     contact: { found: !!categorized.contact },
-    faq: { found: (categorized.faq?.length || 0) > 0, count: categorized.faq?.length || 0 },
+    faq: {
+      found: (categorized.faq?.length || 0) > 0,
+      count: categorized.faq?.length || 0,
+      savedItems: faqsCreated,
+      duplicatesSkipped: faqsDuplicated,
+    },
     summary: { found: !!categorized.summary },
     other: { found: !!categorized.other },
   };
@@ -112,7 +123,7 @@ export const importFromUrl = asyncHandler(async (req: Request, res: Response) =>
 
   res.json({
     message: `Imported ${result.menuItemsCreated} new menu items (${result.duplicatesSkipped} duplicates skipped)`,
-    categorized: buildCategorizedResponse(result.categorized, result.menuItemsCreated, result.duplicatesSkipped),
+    categorized: buildCategorizedResponse(result.categorized, result.menuItemsCreated, result.duplicatesSkipped, result.faqsCreated, result.faqsDuplicated),
   });
 });
 
@@ -126,7 +137,7 @@ export const importFromPdf = asyncHandler(async (req: Request, res: Response) =>
 
   res.json({
     message: `Imported ${result.menuItemsCreated} new menu items from PDF`,
-    categorized: buildCategorizedResponse(result.categorized, result.menuItemsCreated, result.duplicatesSkipped),
+    categorized: buildCategorizedResponse(result.categorized, result.menuItemsCreated, result.duplicatesSkipped, result.faqsCreated, result.faqsDuplicated),
   });
 });
 
@@ -136,11 +147,11 @@ export const importFromImage = asyncHandler(async (req: Request, res: Response) 
   const businessId = await getBusinessId(req.user!.userId);
   const fileName = req.file.originalname || req.file.filename;
 
-  const result = await extractionService.extractFromImage(businessId, req.file.path, fileName);
+  const result = await extractionService.extractFromImage(businessId, req.file.path, fileName, req.file.mimetype);
 
   res.json({
     message: `Imported ${result.menuItemsCreated} new menu items from image`,
-    categorized: buildCategorizedResponse(result.categorized, result.menuItemsCreated, result.duplicatesSkipped),
+    categorized: buildCategorizedResponse(result.categorized, result.menuItemsCreated, result.duplicatesSkipped, result.faqsCreated, result.faqsDuplicated),
   });
 });
 
@@ -158,14 +169,14 @@ export const importFromFile = asyncHandler(async (req: Request, res: Response) =
   } else if (mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
     result = await extractionService.extractFromDocx(businessId, req.file.path, fileName);
   } else if (mime === 'image/png' || mime === 'image/jpeg' || mime === 'image/jpg') {
-    result = await extractionService.extractFromImage(businessId, req.file.path, fileName);
+    result = await extractionService.extractFromImage(businessId, req.file.path, fileName, mime);
   } else {
     throw ApiError.badRequest('Unsupported file type. Please upload a PDF, DOCX, or PNG.');
   }
 
   res.json({
     message: `Imported ${result.menuItemsCreated} new items from ${fileName}`,
-    categorized: buildCategorizedResponse(result.categorized, result.menuItemsCreated, result.duplicatesSkipped),
+    categorized: buildCategorizedResponse(result.categorized, result.menuItemsCreated, result.duplicatesSkipped, result.faqsCreated, result.faqsDuplicated),
   });
 });
 
@@ -180,6 +191,7 @@ const POS_REQUIRED_FIELDS: Record<PosSystem, string[]> = {
   TouchBistro: ['apiKey', 'locationId'],
   Revel:       ['apiKey', 'establishmentId'],
   Micros:      ['apiKey', 'locationId'],
+  SpotOn:      ['apiKey', 'siteId'],
 };
 
 // Per-POS fetch — extend each case with real API calls as integrations are built
@@ -253,10 +265,10 @@ export const importFromPos = asyncHandler(async (req: Request, res: Response) =>
 
 export const listFaqs = asyncHandler(async (req: Request, res: Response) => {
   const businessId = await getBusinessId(req.user!.userId);
-  const extraction = await prisma.businessExtraction.findFirst({
-    where: { businessId, category: 'faq' },
+  const faqs = await prisma.faq.findMany({
+    where: { businessId },
+    orderBy: { position: 'asc' },
   });
-  const faqs = (extraction?.structuredData as any)?.faq || [];
   res.json(faqs);
 });
 
@@ -265,36 +277,16 @@ export const createFaq = asyncHandler(async (req: Request, res: Response) => {
   const { question, answer } = req.body;
   if (!question || !answer) throw ApiError.badRequest('Question and answer are required');
 
-  const extraction = await prisma.businessExtraction.findFirst({
-    where: { businessId, category: 'faq' },
+  const duplicate = await prisma.faq.findFirst({
+    where: { businessId, question: { equals: question.trim(), mode: 'insensitive' } },
   });
+  if (duplicate) throw ApiError.conflict('This FAQ already exists');
 
-  if (extraction) {
-    const existing = (extraction.structuredData as any)?.faq || [];
-    const duplicate = existing.find(
-      (f: any) => f.question.toLowerCase() === question.toLowerCase()
-    );
-    if (duplicate) throw ApiError.conflict('This FAQ already exists');
-
-    const updated = [...existing, { id: Date.now().toString(), question, answer }];
-    await prisma.businessExtraction.update({
-      where: { id: extraction.id },
-      data: { structuredData: { faq: updated } as any },
-    });
-    res.json({ id: Date.now().toString(), question, answer });
-  } else {
-    const newFaq = { id: Date.now().toString(), question, answer };
-    await prisma.businessExtraction.create({
-      data: {
-        businessId,
-        source: 'manual',
-        category: 'faq',
-        rawText: `Q: ${question}\nA: ${answer}`,
-        structuredData: { faq: [newFaq] } as any,
-      },
-    });
-    res.json(newFaq);
-  }
+  const count = await prisma.faq.count({ where: { businessId } });
+  const faq = await prisma.faq.create({
+    data: { businessId, question: question.trim(), answer: answer.trim(), position: count },
+  });
+  res.status(201).json(faq);
 });
 
 export const updateFaq = asyncHandler(async (req: Request, res: Response) => {
@@ -302,38 +294,23 @@ export const updateFaq = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
   const { question, answer } = req.body;
 
-  const extraction = await prisma.businessExtraction.findFirst({
-    where: { businessId, category: 'faq' },
-  });
-  if (!extraction) throw ApiError.notFound('No FAQs found');
+  const existing = await prisma.faq.findFirst({ where: { id, businessId } });
+  if (!existing) throw ApiError.notFound('FAQ not found');
 
-  const existing = (extraction.structuredData as any)?.faq || [];
-  const updated = existing.map((f: any) =>
-    f.id === id ? { ...f, question, answer } : f
-  );
-
-  await prisma.businessExtraction.update({
-    where: { id: extraction.id },
-    data: { structuredData: { faq: updated } as any },
+  const updated = await prisma.faq.update({
+    where: { id },
+    data: { question: question.trim(), answer: answer.trim() },
   });
-  res.json({ id, question, answer });
+  res.json(updated);
 });
 
 export const deleteFaq = asyncHandler(async (req: Request, res: Response) => {
   const businessId = await getBusinessId(req.user!.userId);
   const { id } = req.params;
 
-  const extraction = await prisma.businessExtraction.findFirst({
-    where: { businessId, category: 'faq' },
-  });
-  if (!extraction) throw ApiError.notFound('No FAQs found');
+  const existing = await prisma.faq.findFirst({ where: { id, businessId } });
+  if (!existing) throw ApiError.notFound('FAQ not found');
 
-  const existing = (extraction.structuredData as any)?.faq || [];
-  const updated = existing.filter((f: any) => f.id !== id);
-
-  await prisma.businessExtraction.update({
-    where: { id: extraction.id },
-    data: { structuredData: { faq: updated } as any },
-  });
+  await prisma.faq.delete({ where: { id } });
   res.json({ message: 'FAQ deleted' });
 });

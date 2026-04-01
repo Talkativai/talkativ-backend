@@ -18,7 +18,10 @@ const envSchema = z.object({
   STRIPE_PUBLIC_KEY: z.string().default(''),
   STRIPE_WEBHOOK_SECRET: z.string().default(''),
 
-  RESEND_API_KEY: z.string().default(''),
+  SMTP_HOST: z.string().default('smtp.gmail.com'),
+  SMTP_PORT: z.coerce.number().default(587),
+  SMTP_USER: z.string().default(''),
+  SMTP_PASS: z.string().default(''),
   EMAIL_FROM: z.string().default('noreply@talkativ.io'),
   EMAIL_FROM_NAME: z.string().default('Talkativ'),
 
@@ -37,12 +40,22 @@ const envSchema = z.object({
   // Groq AI
   GROQ_API_KEY: z.string().default(''),
 
+  // Anthropic (Claude) API
+  ANTHROPIC_API_KEY: z.string().default(''),
+
   // Google API (Places API)
   GOOGLE_API_KEY: z.string().default(''),
 
   // Stripe price IDs
   STRIPE_STARTER_PRICE_ID: z.string().default(''),
   STRIPE_GROWTH_PRICE_ID: z.string().default(''),
+
+  // POS environments
+  SQUARE_ENVIRONMENT: z.enum(['sandbox', 'production']).default('sandbox'),
+  CLOVER_ENVIRONMENT: z.enum(['sandbox', 'production']).default('sandbox'),
+
+  // SpotOn POS
+  SPOTON_WEBHOOK_SECRET: z.string().default(''),
 });
 
 const parsed = envSchema.safeParse(process.env);

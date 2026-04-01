@@ -53,7 +53,7 @@ export const findOrCreateUser = async (profile: {
   family_name: string;
 }) => {
   // First check if user exists by googleId
-  let user = await prisma.user.findUnique({ where: { googleId: profile.id } });
+  let user = await prisma.user.findFirst({ where: { googleId: profile.id } });
   if (user) return user;
 
   // Check if user exists by email (link accounts)

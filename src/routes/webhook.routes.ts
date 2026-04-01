@@ -16,5 +16,6 @@ router.post('/public/catalogue-lookup', webhookController.catalogueLookup);
 router.post('/public/create-order', webhookController.createOrder);
 router.post('/public/create-reservation', webhookController.createReservation);
 router.post('/public/check-hours', webhookController.checkHours);
+router.post('/public/check-delivery', webhookController.checkDeliveryAddress);
 
 export default router;

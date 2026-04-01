@@ -26,7 +26,7 @@ export const updateItemSchema = z.object({
 
 export const SUPPORTED_POS_SYSTEMS = [
   'Clover', 'Square', 'OpenTable', 'Aloha', 'Olo',
-  'Lightspeed', 'TouchBistro', 'Revel', 'Micros',
+  'Lightspeed', 'TouchBistro', 'Revel', 'Micros', 'SpotOn',
 ] as const;
 
 export type PosSystem = (typeof SUPPORTED_POS_SYSTEMS)[number];

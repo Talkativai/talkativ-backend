@@ -16,7 +16,110 @@ export const createAgent = async (config: {
   voiceId: string;
   language?: string;
   businessId: string;
+  transferEnabled?: boolean;
+  transferNumber?: string;
 }) => {
+  const tools: any[] = [
+    {
+      type: 'webhook',
+      name: 'lookup_catalogue',
+      description: 'Look up menu items by name or category. Use this to confirm prices or availability before creating an order.',
+      url: `${env.BACKEND_URL}/webhooks/public/catalogue-lookup`,
+      method: 'POST',
+      body_schema: {
+        type: 'object',
+        properties: {
+          business_id: { type: 'string', description: `Always send EXACTLY this value: ${config.businessId}` },
+          query: { type: 'string', description: 'Menu item name or category to search' },
+        },
+        required: ['business_id', 'query'],
+      },
+    },
+    {
+      type: 'webhook',
+      name: 'validate_delivery_address',
+      description: 'Validate a customer\'s address to ensure it falls within the delivery radius. MUST be called before creating a DELIVERY order.',
+      url: `${env.BACKEND_URL}/webhooks/public/check-delivery`,
+      method: 'POST',
+      body_schema: {
+        type: 'object',
+        properties: {
+          business_id: { type: 'string', description: `Always send EXACTLY this value: ${config.businessId}` },
+          customer_address: { type: 'string', description: 'Full address provided by the customer' },
+        },
+        required: ['business_id', 'customer_address'],
+      },
+    },
+    {
+      type: 'webhook',
+      name: 'create_order',
+      description: 'Place a food order. For DELIVERY, ensure you have validated the address first.',
+      url: `${env.BACKEND_URL}/webhooks/public/create-order`,
+      method: 'POST',
+      body_schema: {
+        type: 'object',
+        properties: {
+          business_id: { type: 'string', description: `Always send EXACTLY this value: ${config.businessId}` },
+          customer_name: { type: 'string', description: 'Full name' },
+          customer_phone: { type: 'string', description: 'Phone number' },
+          customer_email: { type: 'string', description: 'Email address, required if paying now' },
+          delivery_address: { type: 'string', description: 'Formatted, validated delivery address if type is DELIVERY' },
+          items: { type: 'string', description: 'Comma separated list of ordered items exactly as listed in the menu' },
+          type: { type: 'string', enum: ['DELIVERY', 'COLLECTION', 'DINE_IN'] },
+          allergies: { type: 'string', description: 'Any food allergies or dietary requirements specifically stated by the caller' },
+          payment_method: { type: 'string', enum: ['pay_now', 'pay_on_delivery', 'pay_on_collection'] },
+          notes: { type: 'string', description: 'Special instructions or notes for the kitchen' },
+        },
+        required: ['business_id', 'customer_name', 'items', 'type', 'payment_method'],
+      },
+    },
+    {
+      type: 'webhook',
+      name: 'create_reservation',
+      description: 'Book a table reservation for the customer.',
+      url: `${env.BACKEND_URL}/webhooks/public/create-reservation`,
+      method: 'POST',
+      body_schema: {
+        type: 'object',
+        properties: {
+          business_id: { type: 'string', description: `Always send EXACTLY this value: ${config.businessId}` },
+          guest_name: { type: 'string' },
+          guest_phone: { type: 'string' },
+          guest_email: { type: 'string', description: 'Email address (required to send deposit link if applicable)' },
+          guests: { type: 'number', description: 'Number of guests attending' },
+          date_time: { type: 'string', description: 'ISO date string representing the requested reservation date and time' },
+        },
+        required: ['business_id', 'guest_name', 'guests', 'date_time'],
+      },
+    },
+    {
+      type: 'webhook',
+      name: 'check_hours',
+      description: 'Check the restaurant\'s exact opening and closing hours for each day.',
+      url: `${env.BACKEND_URL}/webhooks/public/check-hours`,
+      method: 'POST',
+      body_schema: {
+        type: 'object',
+        properties: {
+          business_id: { type: 'string', description: `Always send EXACTLY this value: ${config.businessId}` },
+        },
+        required: ['business_id'],
+      },
+    },
+  ];
+
+  if (config.transferEnabled && config.transferNumber) {
+    tools.push({
+      type: 'system',
+      name: 'transfer_call',
+      description: 'Transfer the call to a human manager.',
+      system_tool_mapping: {
+        type: 'transfer_call',
+        number: config.transferNumber,
+      },
+    });
+  }
+
   const res = await fetch(`${BASE_URL}/convai/agents/create`, {
     method: 'POST',
     headers: headers(),
@@ -30,78 +133,7 @@ export const createAgent = async (config: {
         },
         tts: { voice_id: config.voiceId },
       },
-      tools: [
-        {
-          type: 'webhook',
-          name: 'lookup_catalogue',
-          description: 'Look up menu items by name or category',
-          url: `${env.BACKEND_URL}/api/webhooks/public/catalogue-lookup`,
-          method: 'POST',
-          body_schema: {
-            type: 'object',
-            properties: {
-              business_id: { type: 'string', value: config.businessId },
-              query: { type: 'string', description: 'Menu item name or category to search' },
-            },
-            required: ['business_id', 'query'],
-          },
-        },
-        {
-          type: 'webhook',
-          name: 'create_order',
-          description: 'Place a food order for delivery or collection',
-          url: `${env.BACKEND_URL}/api/webhooks/public/create-order`,
-          method: 'POST',
-          body_schema: {
-            type: 'object',
-            properties: {
-              business_id: { type: 'string', value: config.businessId },
-              customer_name: { type: 'string' },
-              customer_phone: { type: 'string' },
-              customer_email: { type: 'string' },
-              items: { type: 'string', description: 'Comma separated list of ordered items' },
-              type: { type: 'string', enum: ['DELIVERY', 'COLLECTION', 'DINE_IN'] },
-              allergies: { type: 'string', description: 'Any food allergies or dietary requirements' },
-              payment_method: { type: 'string', enum: ['pay_now', 'pay_on_delivery', 'pay_on_collection'] },
-              notes: { type: 'string' },
-            },
-            required: ['business_id', 'customer_name', 'items', 'type', 'payment_method'],
-          },
-        },
-        {
-          type: 'webhook',
-          name: 'create_reservation',
-          description: 'Book a table reservation',
-          url: `${env.BACKEND_URL}/api/webhooks/public/create-reservation`,
-          method: 'POST',
-          body_schema: {
-            type: 'object',
-            properties: {
-              business_id: { type: 'string', value: config.businessId },
-              guest_name: { type: 'string' },
-              guest_phone: { type: 'string' },
-              guest_email: { type: 'string' },
-              guests: { type: 'number', description: 'Number of guests' },
-              date_time: { type: 'string', description: 'ISO date string for reservation' },
-            },
-            required: ['business_id', 'guest_name', 'guests', 'date_time'],
-          },
-        },
-        {
-          type: 'webhook',
-          name: 'check_hours',
-          description: 'Check the restaurant opening hours',
-          url: `${env.BACKEND_URL}/api/webhooks/public/check-hours`,
-          method: 'POST',
-          body_schema: {
-            type: 'object',
-            properties: {
-              business_id: { type: 'string', value: config.businessId },
-            },
-            required: ['business_id'],
-          },
-        },
-      ],
+      tools,
     }),
   });
   if (!res.ok) {
@@ -172,44 +204,67 @@ export const listVoices = async () => {
 
 // ─── System Prompt Template ──────────────────────────────────────────────────
 
-export const buildSystemPrompt = (business: {
-  name: string;
-  type: string;
-  address: string;
-  openingHours: any;
-  agentSchedule?: any;
-  agentName: string;
-  transferNumber?: string;
-  greeting: string;
-}) => {
+export const buildSystemPrompt = (business: any) => {
   const scheduleSource = business.agentSchedule || business.openingHours;
   const hoursStr = scheduleSource
     ? Object.entries(scheduleSource)
-        .map(([day, hours]) => `${day}: ${hours}`)
+        .map(([day, hours]: [string, any]) => `${day}: ${hours.closed ? 'Closed' : `${hours.open} - ${hours.close}`}`)
         .join('\n')
     : 'Not specified';
 
-  return `You are ${business.agentName}, the AI phone assistant for ${business.name}.
-Business type: ${business.type}
-Location: ${business.address}
+  const orderPol = business.orderingPolicy;
+  const orderRules = orderPol ? `
+  - Delivery: ${orderPol.deliveryEnabled ? `Enabled. Fee: £${orderPol.deliveryFee}. Radius: ${orderPol.deliveryRadius} ${orderPol.deliveryRadiusUnit}` : 'Disabled'}
+  - Collection: ${orderPol.collectionEnabled ? 'Enabled' : 'Disabled'}
+  - Min Order Amount: £${orderPol.minOrderAmount}
+  - Payment Methods Allowed: ${orderPol.deliveryPayOnDelivery || orderPol.payOnDelivery ? 'Pay on Delivery, ' : ''}${orderPol.collectionPayOnPickup ? 'Pay on Collection, ' : ''}${(orderPol.payNowEnabled || orderPol.deliveryPayNow || orderPol.collectionPayNow) ? 'Pay Now' : ''}
+  ` : '- No ordering policy strictly set. Assume delivery and collection and pay now are enabled.';
+
+  const resPol = business.reservationPolicy;
+  const resRules = resPol ? `
+  - Reservations Enabled: Yes
+  - Max Party Size: ${resPol.maxPartySize} guests
+  - Booking Lead Time: ${resPol.bookingLeadTime} hours
+  - Deposit Required: ${resPol.depositRequired ? `Yes. Amount: £${resPol.depositAmount} (${resPol.depositType})` : 'No'}
+  ` : '- No reservation policy strictly set. Assume standard reservations are allowed.';
+
+  const faqs = (business.faqs || []).map((f: any) => `Q: ${f.question}\nA: ${f.answer}`).join('\n\n');
+
+  return `You are ${business.agentName}, the world-class AI phone assistant for ${business.name}.
+Business type: ${business.type || 'Restaurant'}
+Location: ${business.address || 'Not officially provided'}
 Hours:
 ${hoursStr}
 
+---
+BUSINESS POLICIES & RULES:
+
+📋 Ordering Rules:
+${orderRules}
+
+🗓️ Reservation Rules:
+${resRules}
+
+❓ Frequently Asked Questions (Use these to answer customer questions):
+${faqs}
+
+---
 YOUR CAPABILITIES:
-- Answer questions about the menu using the lookup_catalogue tool
-- Take phone orders using the create_order tool
-- Book reservations using the create_reservation tool
-- Provide business hours using the check_hours tool
+- You can look up menu items and prices using "lookup_catalogue"
+- You can place orders using "create_order"
+- You can book reservations using "create_reservation"
+- You can check hours using "check_hours"
+${business.agent?.transferEnabled ? '- You can transfer calls to a human using "transfer_call"' : ''}
 
-RULES:
-- Always be warm, friendly, and professional
-- If you cannot help, transfer to ${business.transferNumber || 'the manager'}
-- Before transferring, offer to take a message
-- Always match the caller's language
-- Confirm orders before finalizing
-- If a caller's details (name, email, address, number) are unclear, ask them to spell it out
-- You MUST NOT accept orders or reservations outside of business hours. If a customer tries to order or make a reservation outside of the working hours listed above, politely let them know the business is currently closed, tell them the working hours, and suggest they call back during those times.
-- When a customer is placing an order (either delivery or collection), you MUST always ask if they have any food allergies or dietary requirements before finalising the order. This is mandatory for every order.
+CRITICAL INSTRUCTIONS (MUST FOLLOW STRICTLY):
+1. LATENCY & WAITING: When you need to call a tool (like validating an address or looking up the menu), first say a quick filler phrase so the customer doesn't wait in complete silence. Example: "Let me quickly check our map to ensure you're within the delivery radius."
+2. DELIVERY ADDRESS VALIDATION: If a customer orders Delivery, you MUST explicitly ask for their full address including postcode, and call the "validate_delivery_address" tool BEFORE finalizing the order. If the tool says they are outside the radius, apologize and offer Collection instead.
+3. ALLERGY CHECK: When taking ANY order, you MUST explicitly ask: "Do you have any food allergies or dietary requirements?" before finalizing.
+4. MANAGER TRANSFER: ${business.agent?.transferEnabled ? `If the customer explicitly asks to speak to a real person/human/manager OR if the customer exhibits extreme anger or frustration, you MUST immediately call the "transfer_call" tool to transfer them. Before transferring, briefly apologize or acknowledge.` : 'No human transfer is currently available. If asked, politely explain that no one is available and offer to take a message.'}
+5. PAYMENTS: Always confirm their preferred payment method based on what is allowed in the Ordering Rules. If they choose "Pay Now", you MUST ask for their email address to send the payment link.
+6. DATA CLARITY: If names, emails, or phone numbers are mumbled or unclear, ask the customer to spell it out. Never guess an email.
 
-OPENING: ${business.greeting}`;
+OPENING GREETING:
+${business.agent?.openingGreeting || business.greeting || `Hi, thanks for calling ${business.name}. How can I help you today?`}
+`;
 };

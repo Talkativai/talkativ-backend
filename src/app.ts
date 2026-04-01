@@ -59,7 +59,8 @@ app.use('/webhooks', webhookRoutes);
 app.use('/api/public', webhookRoutes);
 
 // ─── Public Business Search (for onboarding, no auth needed) ─────────────────
-import * as googlePlaces from './services/google-places.service.js';
+import * as claudeSearch from './services/claude-search.service.js';
+
 app.get('/api/public/search-business', apiLimiter, async (req, res) => {
   const query = req.query.q as string;
   if (!query || query.length < 2) {
@@ -67,7 +68,7 @@ app.get('/api/public/search-business', apiLimiter, async (req, res) => {
     return;
   }
   try {
-    const results = await googlePlaces.searchBusinesses(query);
+    const results = await claudeSearch.searchBusinesses(query);
     res.json({ results });
   } catch (err: any) {
     console.error('Business search error:', err);
