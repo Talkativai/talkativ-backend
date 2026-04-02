@@ -1,29 +1,42 @@
-import nodemailer from 'nodemailer';
+// ─── Nodemailer implementation (commented out — replaced by Resend) ──────────
+//
+// import nodemailer from 'nodemailer';
+// import { env } from '../config/env.js';
+//
+// const transporter = nodemailer.createTransport({
+//   host: env.SMTP_HOST,
+//   port: env.SMTP_PORT,
+//   secure: env.SMTP_PORT === 465,
+//   auth: {
+//     user: env.SMTP_USER,
+//     pass: env.SMTP_PASS,
+//   },
+// });
+//
+// const from = `${env.EMAIL_FROM_NAME} <${env.EMAIL_FROM}>`;
+//
+// export const sendEmail = async (params: { to: string; subject: string; html: string }) => {
+//   return transporter.sendMail({ from, to: params.to, subject: params.subject, html: params.html });
+// };
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { Resend } from 'resend';
 import { env } from '../config/env.js';
 
-const transporter = nodemailer.createTransport({
-  host: env.SMTP_HOST,
-  port: env.SMTP_PORT,
-  secure: env.SMTP_PORT === 465,
-  auth: {
-    user: env.SMTP_USER,
-    pass: env.SMTP_PASS,
-  },
-});
-
+const resend = new Resend(env.RESEND_API_KEY);
 const from = `${env.EMAIL_FROM_NAME} <${env.EMAIL_FROM}>`;
 
 // ─── Generic Email ───────────────────────────────────────────────────────────
 export const sendEmail = async (params: { to: string; subject: string; html: string }) => {
-  return transporter.sendMail({ from, to: params.to, subject: params.subject, html: params.html });
+  return resend.emails.send({ from, to: [params.to], subject: params.subject, html: params.html });
 };
 
 // ─── Email Templates ─────────────────────────────────────────────────────────
 
 export const sendWelcomeEmail = async (to: string, firstName: string) => {
-  return transporter.sendMail({
+  return resend.emails.send({
     from,
-    to,
+    to: [to],
     subject: 'Welcome to Talkativ! 🎉',
     html: `
       <h1>Welcome, ${firstName}!</h1>
@@ -34,9 +47,9 @@ export const sendWelcomeEmail = async (to: string, firstName: string) => {
 };
 
 export const sendPasswordResetEmail = async (to: string, resetUrl: string) => {
-  return transporter.sendMail({
+  return resend.emails.send({
     from,
-    to,
+    to: [to],
     subject: 'Reset your password — Talkativ',
     html: `
       <h1>Password Reset</h1>
@@ -48,9 +61,9 @@ export const sendPasswordResetEmail = async (to: string, resetUrl: string) => {
 };
 
 export const sendOrderConfirmation = async (to: string, order: { id: string; items: string; amount: string }) => {
-  return transporter.sendMail({
+  return resend.emails.send({
     from,
-    to,
+    to: [to],
     subject: `Order Confirmed — #${order.id.slice(0, 8)}`,
     html: `
       <h1>New Order Placed</h1>
@@ -62,9 +75,9 @@ export const sendOrderConfirmation = async (to: string, order: { id: string; ite
 };
 
 export const sendMissedCallAlert = async (to: string, callerPhone: string) => {
-  return transporter.sendMail({
+  return resend.emails.send({
     from,
-    to,
+    to: [to],
     subject: 'Missed Call Alert — Talkativ',
     html: `
       <h1>Missed Call</h1>
@@ -75,9 +88,9 @@ export const sendMissedCallAlert = async (to: string, callerPhone: string) => {
 };
 
 export const sendPaymentReceipt = async (to: string, amount: string, date: string) => {
-  return transporter.sendMail({
+  return resend.emails.send({
     from,
-    to,
+    to: [to],
     subject: 'Payment Receipt — Talkativ',
     html: `
       <h1>Payment Received</h1>
@@ -89,9 +102,9 @@ export const sendPaymentReceipt = async (to: string, amount: string, date: strin
 };
 
 export const sendTrialEndingEmail = async (to: string, daysLeft: number) => {
-  return transporter.sendMail({
+  return resend.emails.send({
     from,
-    to,
+    to: [to],
     subject: `Your trial ends in ${daysLeft} days — Talkativ`,
     html: `
       <h1>Trial Ending Soon</h1>
@@ -102,9 +115,9 @@ export const sendTrialEndingEmail = async (to: string, daysLeft: number) => {
 };
 
 export const sendPasswordChangeAlert = async (to: string, firstName: string, recoveryUrl: string) => {
-  return transporter.sendMail({
+  return resend.emails.send({
     from,
-    to,
+    to: [to],
     subject: 'Your password was changed — Talkativ',
     html: `
       <h1>Password Changed</h1>
@@ -118,9 +131,9 @@ export const sendPasswordChangeAlert = async (to: string, firstName: string, rec
 };
 
 export const sendOtpEmail = async (to: string, firstName: string, code: string) => {
-  return transporter.sendMail({
+  return resend.emails.send({
     from,
-    to,
+    to: [to],
     subject: `Your Talkativ verification code: ${code}`,
     html: `
       <h1>Verification Code</h1>
@@ -133,9 +146,9 @@ export const sendOtpEmail = async (to: string, firstName: string, code: string) 
 };
 
 export const sendStaffCredentials = async (to: string, firstName: string, businessName: string, username: string, password: string) => {
-  return transporter.sendMail({
+  return resend.emails.send({
     from,
-    to,
+    to: [to],
     subject: `You've been added to ${businessName} on Talkativ`,
     html: `
       <div style="font-family:'Segoe UI',sans-serif;max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:16px;overflow:hidden;">
@@ -163,9 +176,9 @@ export const sendStaffCredentials = async (to: string, firstName: string, busine
 };
 
 export const sendRefundRequestAlert = async (to: string, guestName: string, reservationId: string, amount: string) => {
-  return transporter.sendMail({
+  return resend.emails.send({
     from,
-    to,
+    to: [to],
     subject: `Refund request — ${guestName}`,
     html: `
       <h1>Reservation Refund Request</h1>
@@ -193,9 +206,9 @@ export const sendBusinessNewOrderAlert = async (to: string, businessName: string
   paymentMethod: string;
   paymentStatus: string;
 }) => {
-  return transporter.sendMail({
+  return resend.emails.send({
     from,
-    to,
+    to: [to],
     subject: `🚨 New Order via Talkativ — #${orderDetails.id.slice(0, 8)}`,
     html: `
       <div style="font-family:'Segoe UI',sans-serif;max-width:600px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:12px;overflow:hidden;">
@@ -237,9 +250,9 @@ export const sendBusinessNewReservationAlert = async (to: string, businessName: 
   dateTime: Date;
   depositStatus: string;
 }) => {
-  return transporter.sendMail({
+  return resend.emails.send({
     from,
-    to,
+    to: [to],
     subject: `📅 New Reservation via Talkativ — ${reservationDetails.guestName}`,
     html: `
       <div style="font-family:'Segoe UI',sans-serif;max-width:600px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:12px;overflow:hidden;">

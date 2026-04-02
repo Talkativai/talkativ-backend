@@ -18,10 +18,11 @@ const envSchema = z.object({
   STRIPE_PUBLIC_KEY: z.string().default(''),
   STRIPE_WEBHOOK_SECRET: z.string().default(''),
 
-  SMTP_HOST: z.string().default('smtp.gmail.com'),
-  SMTP_PORT: z.coerce.number().default(587),
-  SMTP_USER: z.string().default(''),
-  SMTP_PASS: z.string().default(''),
+  // SMTP_HOST: z.string().default('smtp.gmail.com'),  // removed — using Resend
+  // SMTP_PORT: z.coerce.number().default(587),        // removed — using Resend
+  // SMTP_USER: z.string().default(''),                // removed — using Resend
+  // SMTP_PASS: z.string().default(''),                // removed — using Resend
+  RESEND_API_KEY: z.string().default(''),
   EMAIL_FROM: z.string().default('noreply@talkativ.io'),
   EMAIL_FROM_NAME: z.string().default('Talkativ'),
 
