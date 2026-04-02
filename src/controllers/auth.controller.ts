@@ -5,6 +5,8 @@ import prisma from '../config/db.js';
 import { env } from '../config/env.js';
 import * as authService from '../services/auth.service.js';
 import * as googleOAuth from '../services/google-oauth.service.js';
+import * as emailService from '../services/email.service.js';
+import jwt from 'jsonwebtoken';
 
 export const register = asyncHandler(async (req: Request, res: Response) => {
   const { email, password, firstName, lastName, googleId } = req.body;
@@ -58,6 +60,13 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
 
   // Generate tokens
   const tokens = await authService.generateTokenPair(user);
+
+  // Send welcome email (best effort)
+  try {
+    await emailService.sendWelcomeEmail(user.email, user.firstName);
+  } catch (err) {
+    console.error('[Email] Failed to send welcome email:', err);
+  }
 
   // Set refresh token cookie
   res.cookie('refresh_token', tokens.refreshToken, {
@@ -149,15 +158,35 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response) =
   // Always return success to prevent email enumeration
   const user = await prisma.user.findUnique({ where: { email } });
   if (user) {
-    // In production: generate reset token, save to DB, send email
-    console.log(`Password reset requested for ${email}`);
+    const resetToken = jwt.sign({ userId: user.id }, env.JWT_SECRET, { expiresIn: '1h' });
+    const resetUrl = `${env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+    try {
+      await emailService.sendPasswordResetEmail(user.email, resetUrl);
+    } catch (err) {
+      console.error('[Email] Failed to send password reset email:', err);
+    }
   }
   res.json({ message: 'If that email exists, a reset link has been sent.' });
 });
 
 export const resetPassword = asyncHandler(async (req: Request, res: Response) => {
-  // In production: verify reset token from params, update password
-  res.json({ message: 'Password reset successfully' });
+  const { token, newPassword } = req.body;
+  if (!token || !newPassword) throw ApiError.badRequest('Token and new password are required');
+
+  try {
+    const decoded = jwt.verify(token, env.JWT_SECRET) as { userId: string };
+    const newHash = await authService.hashPassword(newPassword);
+    
+    await prisma.user.update({
+      where: { id: decoded.userId },
+      data: { passwordHash: newHash }
+    });
+    
+    await authService.revokeAllUserTokens(decoded.userId);
+    res.json({ message: 'Password reset successfully' });
+  } catch (err) {
+    throw ApiError.badRequest('Invalid or expired reset token');
+  }
 });
 
 export const verifyEmail = asyncHandler(async (req: Request, res: Response) => {
