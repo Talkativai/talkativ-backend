@@ -12,10 +12,10 @@ router.post('/stripe', express.raw({ type: 'application/json' }), webhookLimiter
 router.post('/elevenlabs', webhookLimiter, webhookController.elevenlabsWebhook);
 
 // Public tool endpoints (called by ElevenLabs during calls — no auth)
-router.post('/public/catalogue-lookup', webhookController.catalogueLookup);
-router.post('/public/create-order', webhookController.createOrder);
-router.post('/public/create-reservation', webhookController.createReservation);
-router.post('/public/check-hours', webhookController.checkHours);
-router.post('/public/check-delivery', webhookController.checkDeliveryAddress);
+router.post('/public/catalogue-lookup', webhookLimiter, webhookController.catalogueLookup);
+router.post('/public/create-order', webhookLimiter, webhookController.createOrder);
+router.post('/public/create-reservation', webhookLimiter, webhookController.createReservation);
+router.post('/public/check-hours', webhookLimiter, webhookController.checkHours);
+router.post('/public/check-delivery', webhookLimiter, webhookController.checkDeliveryAddress);
 
 export default router;

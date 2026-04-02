@@ -194,6 +194,7 @@ export const staffLogin = asyncHandler(async (req: Request, res: Response) => {
   // Create session
   const device = req.headers['user-agent'] || 'Unknown';
   const ip = req.ip || 'Unknown';
+  await authService.createSession(staff.id, device, ip, 'Unknown');
 
   res.json({
     accessToken,

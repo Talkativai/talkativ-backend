@@ -14,7 +14,7 @@ router.post(`/login/${env.AUTH_LOGIN_HASH}`, authLimiter, validate(loginSchema),
 router.post(`/staff-login/${env.AUTH_LOGIN_HASH}`, authLimiter, validate(staffLoginSchema), authController.staffLogin);
 
 // Public token management
-router.post('/refresh-token', authController.refreshToken);
+router.post('/refresh-token', authLimiter, authController.refreshToken);
 router.post('/logout', authController.logout);
 
 // Password reset (public)
