@@ -187,9 +187,10 @@ export const createStaff = asyncHandler(async (req: Request, res: Response) => {
   // Send credentials to staff email if provided
   if (email) {
     const business = await prisma.business.findUnique({ where: { id: businessId }, select: { name: true } });
+    console.log('[Staff email] Attempting to send to:', email);
     emailService.sendStaffCredentials(email, firstName, business?.name || 'your business', username, password)
-      .then(result => console.log('[Staff email] sent ok:', result))
-      .catch(err => console.error('[Staff email] FAILED:', err));
+      .then(result => console.log('[Staff email] sent ok:', JSON.stringify(result)))
+      .catch(err => console.error('[Staff email] FAILED:', err.message, err.code));
   }
 
   // Return plain password once
