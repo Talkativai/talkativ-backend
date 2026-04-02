@@ -128,6 +128,7 @@ model Agent {
 model PhoneConfig {
   id                String   @id @default(uuid())
   businessId        String   @unique
+  assignedNumber    String?
   forwardNumber     String?
   ringsBeforeAi     Int      @default(0)
   createdAt         DateTime @default(now())

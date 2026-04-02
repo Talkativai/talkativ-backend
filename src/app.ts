@@ -60,6 +60,8 @@ app.use('/api/public', webhookRoutes);
 
 // ─── Public Business Search (for onboarding, no auth needed) ─────────────────
 import * as claudeSearch from './services/claude-search.service.js';
+import * as twilioService from './services/twilio.service.js';
+import { rateLimit } from 'express-rate-limit';
 
 app.get('/api/public/search-business', apiLimiter, async (req, res) => {
   const query = req.query.q as string;
@@ -74,6 +76,41 @@ app.get('/api/public/search-business', apiLimiter, async (req, res) => {
     console.error('Business search error:', err);
     res.json({ results: [] });
   }
+});
+
+// ─── Demo Call (public — no auth) ────────────────────────────────────────────
+const demoCallLimiter = rateLimit({
+  windowMs: 24 * 60 * 60 * 1000, // 24 hours
+  max: 3, // max 3 demo calls per IP per day
+  message: { error: 'Too many demo calls requested. Please try again tomorrow.' },
+});
+
+app.post('/api/public/demo-call', demoCallLimiter, async (req, res) => {
+  const { phoneNumber } = req.body;
+
+  if (!phoneNumber) {
+    res.status(400).json({ error: 'Phone number is required' });
+    return;
+  }
+
+  if (!twilioService.isValidPhoneNumber(phoneNumber)) {
+    res.status(400).json({ error: 'Please enter a valid phone number with country code e.g. +44 7700 000000' });
+    return;
+  }
+
+  if (!env.ELEVENLABS_DEMO_AGENT_ID) {
+    res.status(500).json({ error: 'Demo agent not configured' });
+    return;
+  }
+
+  const result = await twilioService.makeDemoCall(phoneNumber);
+
+  if (!result.success) {
+    res.status(500).json({ error: 'Failed to initiate call. Please try again.' });
+    return;
+  }
+
+  res.json({ success: true, message: 'Calling you now! Pick up in a few seconds.' });
 });
 
 // ─── 404 Handler ─────────────────────────────────────────────────────────────

@@ -3,6 +3,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/apiError.js';
 import prisma from '../config/db.js';
 import * as elevenlabs from '../services/elevenlabs.service.js';
+import * as twilioService from '../services/twilio.service.js';
 
 export const getBusiness = asyncHandler(async (req: Request, res: Response) => {
   const business = await prisma.business.findUnique({
@@ -80,6 +81,7 @@ export const completeOnboarding = asyncHandler(async (req: Request, res: Respons
         agentName,
         transferNumber: business.agent?.transferNumber ?? updated.phone ?? undefined,
         greeting,
+        businessId: business.id,
       });
 
       const elAgent = await elevenlabs.createAgent({
@@ -101,6 +103,39 @@ export const completeOnboarding = asyncHandler(async (req: Request, res: Respons
           systemPrompt,
         },
       });
+
+      // Connect phone number to agent now that agent_id exists
+      try {
+        const phoneConfig = await prisma.phoneConfig.findUnique({ where: { businessId: business.id } });
+
+        if (phoneConfig?.assignedNumber) {
+          // Number already bought in Step 5 — just connect it to the agent
+          await twilioService.connectNumberToAgent(phoneConfig.assignedNumber, elAgent.agent_id);
+          await prisma.agent.update({
+            where: { businessId: business.id },
+            data: { aiPhoneNumber: phoneConfig.assignedNumber },
+          });
+        } else {
+          // No number yet — buy one now based on address country
+          const countryCode = twilioService.detectCountryFromAddress(updated.address || '');
+          const phoneNumber = await twilioService.buyPhoneNumber(countryCode);
+          if (phoneNumber) {
+            await twilioService.connectNumberToAgent(phoneNumber, elAgent.agent_id);
+            await prisma.agent.update({
+              where: { businessId: business.id },
+              data: { aiPhoneNumber: phoneNumber },
+            });
+            await prisma.phoneConfig.upsert({
+              where: { businessId: business.id },
+              update: { assignedNumber: phoneNumber },
+              create: { businessId: business.id, assignedNumber: phoneNumber },
+            });
+          }
+        }
+      } catch (e) {
+        console.error('Phone number connection failed:', e);
+        // Non-fatal — can be connected later via Settings
+      }
     } catch (e) {
       console.error('ElevenLabs agent creation failed:', e);
       // Non-fatal — agent can be retried later via updateAgent
@@ -108,4 +143,31 @@ export const completeOnboarding = asyncHandler(async (req: Request, res: Respons
   }
 
   res.json({ success: true, business: updated });
+});
+
+// ─── Phone setup during onboarding ───────────────────────────────────────────
+export const setupPhone = asyncHandler(async (req: Request, res: Response) => {
+  const business = await prisma.business.findUnique({ where: { userId: req.user!.userId } });
+  if (!business) throw ApiError.notFound('Business not found');
+
+  const { mode, countryCode } = req.body as { mode: 'forward' | 'new'; countryCode?: string };
+
+  let assignedNumber: string | null = null;
+
+  if (mode === 'new') {
+    // Attempt to buy a number — returns null on free tier
+    // Don't connect here — agent doesn't exist yet
+    // Connection happens in completeOnboarding after agent is created
+    const detectedCountry = twilioService.detectCountryFromAddress(business?.address || '');
+    assignedNumber = await twilioService.buyPhoneNumber(countryCode || detectedCountry);
+  }
+
+  // Upsert PhoneConfig with the assigned number (null if free tier or forward mode)
+  const config = await prisma.phoneConfig.upsert({
+    where: { businessId: business.id },
+    update: { ...(mode === 'new' ? { assignedNumber } : {}) },
+    create: { businessId: business.id, assignedNumber: mode === 'new' ? assignedNumber : null },
+  });
+
+  res.json({ assignedNumber: config.assignedNumber });
 });

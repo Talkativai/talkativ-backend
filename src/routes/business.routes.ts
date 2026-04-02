@@ -11,5 +11,6 @@ router.get('/', businessController.getBusiness);
 router.put('/', validate(updateBusinessSchema), businessController.updateBusiness);
 router.put('/onboarding', validate(onboardingBusinessSchema), businessController.updateOnboarding);
 router.post('/complete-onboarding', businessController.completeOnboarding);
+router.post('/setup-phone', businessController.setupPhone);
 
 export default router;

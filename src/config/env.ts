@@ -56,6 +56,14 @@ const envSchema = z.object({
 
   // SpotOn POS
   SPOTON_WEBHOOK_SECRET: z.string().default(''),
+
+  // Twilio
+  TWILIO_ACCOUNT_SID: z.string().default(''),
+  TWILIO_AUTH_TOKEN: z.string().default(''),
+  TWILIO_PHONE_NUMBER: z.string().default(''),
+
+  // ElevenLabs demo agent
+  ELEVENLABS_DEMO_AGENT_ID: z.string().default(''),
 });
 
 const parsed = envSchema.safeParse(process.env);

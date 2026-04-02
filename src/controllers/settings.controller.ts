@@ -51,7 +51,7 @@ export const updateNotifications = asyncHandler(async (req: Request, res: Respon
 export const getPhoneConfig = asyncHandler(async (req: Request, res: Response) => {
   const businessId = await getBusinessId(req.user!.userId);
   const config = await prisma.phoneConfig.findUnique({ where: { businessId } });
-  res.json(config || { forwardNumber: null, ringsBeforeAi: 0 });
+  res.json(config || { assignedNumber: null, forwardNumber: null, ringsBeforeAi: 0 });
 });
 
 export const updatePhoneConfig = asyncHandler(async (req: Request, res: Response) => {

@@ -5,6 +5,7 @@ import prisma from '../config/db.js';
 import * as elevenlabs from '../services/elevenlabs.service.js';
 import { AVAILABLE_VOICES } from '../utils/constants.js';
 import { env } from '../config/env.js';
+import * as twilioService from '../services/twilio.service.js';
 
 const getBusinessId = async (userId: string) => {
   const business = await prisma.business.findUnique({ where: { userId } });
@@ -137,8 +138,38 @@ export const getTranscriptById = asyncHandler(async (req: Request, res: Response
 });
 
 export const testCall = asyncHandler(async (req: Request, res: Response) => {
-  // In production: trigger ElevenLabs outbound test call
-  res.json({ message: 'Test call initiated', status: 'pending' });
+  const businessId = await getBusinessId(req.user!.userId);
+
+  // Get agent and business details
+  const agent = await prisma.agent.findUnique({ where: { businessId } });
+  const business = await prisma.business.findUnique({ where: { id: businessId } });
+
+  if (!agent?.elevenlabsAgentId) {
+    throw ApiError.badRequest('Agent not configured — complete onboarding first');
+  }
+
+  // Get the phone number to call
+  // Priority: number from request body → assigned agent number → business phone
+  const { phoneNumber } = req.body;
+  const toNumber = phoneNumber || agent.aiPhoneNumber || business?.phone;
+
+  if (!toNumber) {
+    throw ApiError.badRequest('No phone number available for test call');
+  }
+
+  // Make outbound call via Twilio
+  const result = await twilioService.makeDemoCall(toNumber, agent.elevenlabsAgentId);
+
+  if (!result.success) {
+    throw ApiError.internal('Failed to initiate test call. Please try again.');
+  }
+
+  res.json({
+    message: 'Test call initiated',
+    status: 'calling',
+    callingNumber: toNumber,
+    callSid: result.callSid,
+  });
 });
 
 export const getSignedUrl = asyncHandler(async (req: Request, res: Response) => {
