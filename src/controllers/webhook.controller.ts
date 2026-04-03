@@ -442,7 +442,7 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
               ${deliveryFee > 0 ? `<p><strong>Delivery Fee:</strong> £${deliveryFee.toFixed(2)}</p>` : ''}
               ${allergies ? `<p><strong>⚠️ Allergies noted:</strong> ${allergies}</p>` : ''}
               <p>Please complete your payment using the link below:</p>
-              <p><a href="${env.FRONTEND_URL}/payment?pi=${paymentIntent.client_secret}">Pay now →</a></p>
+              <p><a href="${env.FRONTEND_URL}/pay?pi=${paymentIntent.client_secret}&order_id=${order.id}&type=order">Pay now →</a></p>
             `,
           });
         } catch (emailErr) {
@@ -602,7 +602,7 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
             <p>Hi ${guest_name},</p>
             <p>Thank you for your reservation for <strong>${guests} guest${guests > 1 ? 's' : ''}</strong> on <strong>${new Date(date_time).toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</strong>.</p>
             <p>A deposit of <strong>£${actualDeposit.toFixed(2)}</strong> is required to confirm your booking.</p>
-            <p><a href="${env.FRONTEND_URL}/payment?pi=${paymentIntent.client_secret}">Pay deposit now →</a></p>
+            <p><a href="${env.FRONTEND_URL}/pay?pi=${paymentIntent.client_secret}&reservation_id=${reservation.id}&type=reservation">Pay deposit now →</a></p>
             <p>Your reservation will be confirmed once the deposit is received.</p>
           `,
         });

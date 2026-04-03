@@ -30,6 +30,9 @@ const prisma = new PrismaClient();
 const app = express();
 app.set('trust proxy', 1);
 
+// ─── Raw body for Stripe webhook (must come BEFORE express.json()) ───────────
+app.use('/webhooks/stripe', express.raw({ type: 'application/json' }));
+
 // ─── Global Middleware ───────────────────────────────────────────────────────
 app.use(helmet());
 app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));

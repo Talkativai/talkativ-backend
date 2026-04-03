@@ -5,42 +5,46 @@ import prisma from '../config/db.js';
 import * as elevenlabs from '../services/elevenlabs.service.js';
 import * as twilioService from '../services/twilio.service.js';
 
+// ─── Helper ──────────────────────────────────────────────────────────────────
+const getBusinessByUserId = async (userId: string) => {
+  const biz = await prisma.business.findUnique({ where: { userId } });
+  if (!biz) throw ApiError.notFound('Business not found');
+  return biz;
+};
+
+// ─── Get Business ─────────────────────────────────────────────────────────────
 export const getBusiness = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = req.user!.businessId;
-  if (!businessId) throw ApiError.notFound('Business not found');
+  const biz = await getBusinessByUserId(req.user!.userId);
   const business = await prisma.business.findUnique({
-    where: { id: businessId },
+    where: { id: biz.id },
     include: { orderingPolicy: true, reservationPolicy: true, notifSettings: true, phoneConfig: true },
   });
-  if (!business) throw ApiError.notFound('Business not found');
   res.json(business);
 });
 
+// ─── Update Business ──────────────────────────────────────────────────────────
 export const updateBusiness = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = req.user!.businessId;
-  if (!businessId) throw ApiError.notFound('Business not found');
-  const updated = await prisma.business.update({ where: { id: businessId }, data: req.body });
+  const biz = await getBusinessByUserId(req.user!.userId);
+  const updated = await prisma.business.update({ where: { id: biz.id }, data: req.body });
   res.json(updated);
 });
 
+// ─── Update Onboarding ────────────────────────────────────────────────────────
 export const updateOnboarding = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = req.user!.businessId;
-  if (!businessId) throw ApiError.notFound('Business not found');
-  const business = await prisma.business.findUnique({ where: { id: businessId } });
-  if (!business) throw ApiError.notFound('Business not found');
-
+  const biz = await getBusinessByUserId(req.user!.userId);
   const updated = await prisma.business.update({
-    where: { id: businessId },
-    data: { ...req.body, onboardingStep: Math.max(business.onboardingStep, 2) },
+    where: { id: biz.id },
+    data: { ...req.body, onboardingStep: Math.max(biz.onboardingStep, 2) },
   });
   res.json(updated);
 });
 
+// ─── Complete Onboarding ──────────────────────────────────────────────────────
 export const completeOnboarding = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = req.user!.businessId;
-  if (!businessId) throw ApiError.notFound('Business not found');
+  const biz = await getBusinessByUserId(req.user!.userId);
+
   const business = await prisma.business.findUnique({
-    where: { id: businessId },
+    where: { id: biz.id },
     include: { agent: true },
   });
   if (!business) throw ApiError.notFound('Business not found');
@@ -75,15 +79,29 @@ export const completeOnboarding = asyncHandler(async (req: Request, res: Respons
       const greeting = business.agent?.openingGreeting
         || `Thank you for calling ${updated.name}, this is ${agentName}. How can I help you today?`;
 
+      // Fetch FAQs, ordering policy and reservation policy
+      const [faqs, orderingPolicy, reservationPolicy] = await Promise.all([
+        prisma.faq.findMany({ where: { businessId: business.id }, orderBy: { position: 'asc' } }),
+        prisma.orderingPolicy.findUnique({ where: { businessId: business.id } }),
+        prisma.reservationPolicy.findUnique({ where: { businessId: business.id } }),
+      ]);
+
       const systemPrompt = elevenlabs.buildSystemPrompt({
         name: updated.name,
         type: updated.type,
         address: updated.address,
         openingHours: updated.openingHours,
         agentName,
-        transferNumber: business.agent?.transferNumber ?? updated.phone ?? undefined,
         greeting,
         businessId: business.id,
+        faqs,
+        orderingPolicy,
+        reservationPolicy,
+        agent: {
+          transferEnabled: business.agent?.transferEnabled ?? true,
+          transferNumber: business.agent?.transferNumber ?? updated.phone ?? undefined,
+          openingGreeting: business.agent?.openingGreeting,
+        },
       });
 
       const elAgent = await elevenlabs.createAgent({
@@ -92,6 +110,8 @@ export const completeOnboarding = asyncHandler(async (req: Request, res: Respons
         firstMessage: greeting,
         voiceId,
         businessId: business.id,
+        transferEnabled: business.agent?.transferEnabled ?? true,
+        transferNumber: business.agent?.transferNumber ?? updated.phone ?? undefined,
       });
 
       await prisma.agent.upsert({
@@ -106,19 +126,17 @@ export const completeOnboarding = asyncHandler(async (req: Request, res: Respons
         },
       });
 
-      // Connect phone number to agent now that agent_id exists
+      // Connect phone number to agent
       try {
         const phoneConfig = await prisma.phoneConfig.findUnique({ where: { businessId: business.id } });
 
         if (phoneConfig?.assignedNumber) {
-          // Number already bought in Step 5 — just connect it to the agent
           await twilioService.connectNumberToAgent(phoneConfig.assignedNumber, elAgent.agent_id);
           await prisma.agent.update({
             where: { businessId: business.id },
             data: { aiPhoneNumber: phoneConfig.assignedNumber },
           });
         } else {
-          // No number yet — buy one now based on address country
           const countryCode = twilioService.detectCountryFromAddress(updated.address || '');
           const phoneNumber = await twilioService.buyPhoneNumber(countryCode);
           if (phoneNumber) {
@@ -136,11 +154,9 @@ export const completeOnboarding = asyncHandler(async (req: Request, res: Respons
         }
       } catch (e) {
         console.error('Phone number connection failed:', e);
-        // Non-fatal — can be connected later via Settings
       }
     } catch (e) {
       console.error('ElevenLabs agent creation failed:', e);
-      // Non-fatal — agent can be retried later via updateAgent
     }
   }
 
@@ -149,28 +165,21 @@ export const completeOnboarding = asyncHandler(async (req: Request, res: Respons
 
 // ─── Phone setup during onboarding ───────────────────────────────────────────
 export const setupPhone = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = req.user!.businessId;
-  if (!businessId) throw ApiError.notFound('Business not found');
-  const business = await prisma.business.findUnique({ where: { id: businessId } });
-  if (!business) throw ApiError.notFound('Business not found');
+  const biz = await getBusinessByUserId(req.user!.userId);
 
   const { mode, countryCode } = req.body as { mode: 'forward' | 'new'; countryCode?: string };
 
   let assignedNumber: string | null = null;
 
   if (mode === 'new') {
-    // Attempt to buy a number — returns null on free tier
-    // Don't connect here — agent doesn't exist yet
-    // Connection happens in completeOnboarding after agent is created
-    const detectedCountry = twilioService.detectCountryFromAddress(business?.address || '');
+    const detectedCountry = twilioService.detectCountryFromAddress(biz.address || '');
     assignedNumber = await twilioService.buyPhoneNumber(countryCode || detectedCountry);
   }
 
-  // Upsert PhoneConfig with the assigned number (null if free tier or forward mode)
   const config = await prisma.phoneConfig.upsert({
-    where: { businessId },
+    where: { businessId: biz.id },
     update: { ...(mode === 'new' ? { assignedNumber } : {}) },
-    create: { businessId, assignedNumber: mode === 'new' ? assignedNumber : null },
+    create: { businessId: biz.id, assignedNumber: mode === 'new' ? assignedNumber : null },
   });
 
   res.json({ assignedNumber: config.assignedNumber });
