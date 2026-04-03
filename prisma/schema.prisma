@@ -128,13 +128,13 @@ model Agent {
 model PhoneConfig {
   id                String   @id @default(uuid())
   businessId        String   @unique
-  assignedNumber    String?
   forwardNumber     String?
   ringsBeforeAi     Int      @default(0)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   callRecording     Boolean  @default(true)
   voicemailFallback Boolean  @default(false)
+  assignedNumber    String?
   business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
 
@@ -219,10 +219,6 @@ model Call {
   createdAt        DateTime     @default(now())
   business         Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
   order            Order?
-
-  @@index([businessId, createdAt(sort: Desc)])
-  @@index([businessId, status])
-  @@index([businessId, outcomeType])
 }
 
 model Order {
@@ -241,17 +237,13 @@ model Order {
   allergies       String?
   customerEmail   String?
   customerPhone   String?
-  deliveryAddress String?
   paymentIntentId String?
   paymentMethod   String?     @default("pay_on_delivery")
   paymentStatus   String?     @default("pending")
+  deliveryAddress String?
   posOrderId      String?
   business        Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
   call            Call?       @relation(fields: [callId], references: [id])
-
-  @@index([businessId, createdAt(sort: Desc)])
-  @@index([businessId, status])
-  @@index([businessId, type])
 }
 
 model Reservation {
@@ -272,10 +264,6 @@ model Reservation {
   guestEmail             String?
   externalId             String?
   business               Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
-
-  @@index([businessId, dateTime])
-  @@index([businessId, status])
-  @@index([businessId, createdAt(sort: Desc)])
 }
 
 model MenuCategory {

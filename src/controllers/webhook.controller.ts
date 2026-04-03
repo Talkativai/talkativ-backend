@@ -484,7 +484,7 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
     confirmation: `Order created successfully!${allergyWarning}`,
     allergies: allergies || null,
     payment_method: payment_method || 'pay_on_delivery',
-    payment_link: paymentLink ? `${env.FRONTEND_URL}/payment?pi=${paymentLink}` : null,
+    payment_link: paymentLink ? `${env.FRONTEND_URL}/pay?pi=${paymentLink}&order_id=${order.id}&type=order` : null,
     total: totalAmount,
   });
 });
@@ -672,7 +672,7 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
     confirmation: `Reservation created successfully!${depositMessage}`,
     deposit_required: depositRequired,
     deposit_amount: actualDeposit,
-    payment_link: paymentLink ? `${env.FRONTEND_URL}/payment?pi=${paymentLink}` : null,
+    payment_link: paymentLink ? `${env.FRONTEND_URL}/pay?pi=${paymentLink}&reservation_id=${reservation.id}&type=reservation` : null,
   });
 });
 

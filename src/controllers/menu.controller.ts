@@ -265,8 +265,9 @@ export const importFromPos = asyncHandler(async (req: Request, res: Response) =>
 // ─── FAQ ─────────────────────────────────────────────────────────────────────
 
 export const listFaqs = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = req.user!.businessId;
-  if (!businessId) throw ApiError.notFound('Business not found');
+  const biz = await prisma.business.findUnique({ where: { userId: req.user!.userId } });
+  if (!biz) throw ApiError.notFound('Business not found');
+  const businessId = biz.id;
   const faqs = await prisma.faq.findMany({
     where: { businessId },
     orderBy: { position: 'asc' },
@@ -275,8 +276,9 @@ export const listFaqs = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const createFaq = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = req.user!.businessId;
-  if (!businessId) throw ApiError.notFound('Business not found');
+  const biz = await prisma.business.findUnique({ where: { userId: req.user!.userId } });
+  if (!biz) throw ApiError.notFound('Business not found');
+  const businessId = biz.id;
   const { question, answer } = req.body;
   if (!question || !answer) throw ApiError.badRequest('Question and answer are required');
 
@@ -293,8 +295,9 @@ export const createFaq = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const updateFaq = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = req.user!.businessId;
-  if (!businessId) throw ApiError.notFound('Business not found');
+  const biz = await prisma.business.findUnique({ where: { userId: req.user!.userId } });
+  if (!biz) throw ApiError.notFound('Business not found');
+  const businessId = biz.id;
   const { id } = req.params;
   const { question, answer } = req.body;
 
@@ -309,8 +312,9 @@ export const updateFaq = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const deleteFaq = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = req.user!.businessId;
-  if (!businessId) throw ApiError.notFound('Business not found');
+  const biz = await prisma.business.findUnique({ where: { userId: req.user!.userId } });
+  if (!biz) throw ApiError.notFound('Business not found');
+  const businessId = biz.id;
   const { id } = req.params;
 
   const existing = await prisma.faq.findFirst({ where: { id, businessId } });

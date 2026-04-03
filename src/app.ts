@@ -22,6 +22,8 @@ import settingsRoutes from './routes/settings.routes.js';
 import uploadRoutes from './routes/upload.routes.js';
 import webhookRoutes from './routes/webhook.routes.js';
 import voicesRoutes from './routes/agent.routes.js';
+import { PrismaClient } from '@prisma/client';
+const prisma = new PrismaClient();
 
 const app = express();
 app.set('trust proxy', 1);
@@ -111,6 +113,25 @@ app.post('/api/public/demo-call', demoCallLimiter, async (req, res) => {
   }
 
   res.json({ success: true, message: 'Calling you now! Pick up in a few seconds.' });
+});
+
+// ─── Public Order/Reservation Details (for payment page) ─────────────────────
+app.get('/api/public/order/:id', async (req, res) => {
+  const order = await prisma.order.findUnique({
+    where: { id: req.params.id },
+    include: { business: { select: { name: true, email: true } } },
+  });
+  if (!order) { res.status(404).json({ error: 'Not found' }); return; }
+  res.json(order);
+});
+
+app.get('/api/public/reservation/:id', async (req, res) => {
+  const reservation = await prisma.reservation.findUnique({
+    where: { id: req.params.id },
+    include: { business: { select: { name: true } } },
+  });
+  if (!reservation) { res.status(404).json({ error: 'Not found' }); return; }
+  res.json(reservation);
 });
 
 // ─── 404 Handler ─────────────────────────────────────────────────────────────

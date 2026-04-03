@@ -206,11 +206,20 @@ export const listVoices = async () => {
 
 export const buildSystemPrompt = (business: any) => {
   const scheduleSource = business.agentSchedule || business.openingHours;
-  const hoursStr = scheduleSource
-    ? Object.entries(scheduleSource)
-        .map(([day, hours]: [string, any]) => `${day}: ${hours.closed ? 'Closed' : `${hours.open} - ${hours.close}`}`)
-        .join('\n')
-    : 'Not specified';
+  let hoursStr = 'Not specified';
+  if (scheduleSource) {
+    if (scheduleSource.is24h === 'true' || scheduleSource.is24h === true) {
+      hoursStr = 'Open 24 hours, 7 days a week';
+    } else {
+      hoursStr = Object.entries(scheduleSource)
+        .map(([day, hours]: [string, any]) => {
+          if (!hours || typeof hours !== 'object') return null;
+          return `${day}: ${hours.closed ? 'Closed' : `${hours.open} - ${hours.close}`}`;
+        })
+        .filter(Boolean)
+        .join('\n');
+    }
+  }
 
   const orderPol = business.orderingPolicy;
   const orderRules = orderPol ? `
@@ -263,6 +272,12 @@ CRITICAL INSTRUCTIONS (MUST FOLLOW STRICTLY):
 4. MANAGER TRANSFER: ${business.agent?.transferEnabled ? `If the customer explicitly asks to speak to a real person/human/manager OR if the customer exhibits extreme anger or frustration, you MUST immediately call the "transfer_call" tool to transfer them. Before transferring, briefly apologize or acknowledge.` : 'No human transfer is currently available. If asked, politely explain that no one is available and offer to take a message.'}
 5. PAYMENTS: Always confirm their preferred payment method based on what is allowed in the Ordering Rules. If they choose "Pay Now", you MUST ask for their email address to send the payment link.
 6. DATA CLARITY: If names, emails, or phone numbers are mumbled or unclear, ask the customer to spell it out. Never guess an email.
+7. TOOL TRANSPARENCY: NEVER mention tool names, API calls, or system processes to customers. Never say "let me check the catalogue", "looking up the database", "calling the system" etc. Instead use natural human phrases like "Let me check what we have for you", "One moment while I look that up", "Let me see our menu".
+8. EMPTY SERVICES: If lookup_catalogue returns no items or an empty list, say "I'm sorry, our menu information isn't available right now. Please check back shortly or visit us directly."
+If create_order fails, say "I'm sorry, our ordering service isn't available right now. Please try again later."
+If create_reservation fails, say "I'm sorry, our reservation service isn't available right now. Please call back or visit us directly."
+NEVER invent or assume menu items, prices, or availability.
+9. CALL ENDING: If the customer has not spoken for more than 10 seconds, politely ask "Are you still there?" If there is still no response after another 5 seconds, say a warm goodbye and end the call. When a conversation is clearly complete (order confirmed, reservation booked, question answered), wrap up naturally and say goodbye. Do not keep the call open unnecessarily.
 
 OPENING GREETING:
 ${business.agent?.openingGreeting || business.greeting || `Hi, thanks for calling ${business.name}. How can I help you today?`}
