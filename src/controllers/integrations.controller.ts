@@ -37,14 +37,9 @@ const VERIFIERS: Record<string, (config: Record<string, string>) => Promise<void
   resOS:  (c) => verifyResOsCredentials(c.apiKey, c.restaurantId),
 };
 
-const getBusinessId = async (userId: string) => {
-  const biz = await prisma.business.findUnique({ where: { userId } });
-  if (!biz) throw ApiError.notFound('Business not found');
-  return biz.id;
-};
-
 export const listIntegrations = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   // Return only CONNECTED integrations for the main list
   const integrations = await prisma.integration.findMany({
     where: { businessId, status: 'CONNECTED' },
@@ -54,7 +49,8 @@ export const listIntegrations = asyncHandler(async (req: Request, res: Response)
 });
 
 export const connectIntegration = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const { name, category, config } = req.body as { name: string; category: string; config?: Record<string, string> };
   if (!name || !category) throw ApiError.badRequest('name and category are required');
 
@@ -73,7 +69,8 @@ export const connectIntegration = asyncHandler(async (req: Request, res: Respons
 });
 
 export const disconnectIntegration = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const existing = await prisma.integration.findFirst({ where: { id: req.params.id, businessId } });
   if (!existing) throw ApiError.notFound('Integration not found');
   const integration = await prisma.integration.update({

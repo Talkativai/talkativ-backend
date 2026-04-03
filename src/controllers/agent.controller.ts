@@ -7,22 +7,19 @@ import { AVAILABLE_VOICES } from '../utils/constants.js';
 import { env } from '../config/env.js';
 import * as twilioService from '../services/twilio.service.js';
 
-const getBusinessId = async (userId: string) => {
-  const business = await prisma.business.findUnique({ where: { userId } });
-  if (!business) throw ApiError.notFound('Business not found');
-  return business.id;
-};
-
 export const getAgent = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const agent = await prisma.agent.findUnique({ where: { businessId } });
   if (!agent) throw ApiError.notFound('Agent not configured');
   res.json(agent);
 });
 
 export const updateAgent = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const business = await prisma.business.findUnique({
-    where: { userId: req.user!.userId },
+    where: { id: businessId },
     include: { agent: true },
   });
   if (!business) throw ApiError.notFound('Business not found');
@@ -72,7 +69,8 @@ export const updateAgent = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const updateVoice = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const agent = await prisma.agent.update({
     where: { businessId },
     data: { voiceId: req.body.voiceId, voiceName: req.body.voiceName },
@@ -81,7 +79,8 @@ export const updateVoice = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const updateScript = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const agent = await prisma.agent.update({
     where: { businessId },
     data: req.body,
@@ -90,7 +89,8 @@ export const updateScript = asyncHandler(async (req: Request, res: Response) => 
 });
 
 export const updateCallRules = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const agent = await prisma.agent.update({
     where: { businessId },
     data: req.body,
@@ -103,7 +103,8 @@ export const getVoices = asyncHandler(async (_req: Request, res: Response) => {
 });
 
 export const getTranscripts = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const calls = await prisma.call.findMany({
     where: { businessId, transcript: { not: null } },
     select: { id: true, callerName: true, callerPhone: true, startedAt: true, duration: true, transcript: true, outcome: true, outcomeType: true },
@@ -114,7 +115,8 @@ export const getTranscripts = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const getTranscriptById = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const id = req.params.id as string;
 
   const call = await prisma.call.findFirst({
@@ -138,7 +140,8 @@ export const getTranscriptById = asyncHandler(async (req: Request, res: Response
 });
 
 export const testCall = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
 
   // Get agent and business details
   const agent = await prisma.agent.findUnique({ where: { businessId } });
@@ -173,7 +176,8 @@ export const testCall = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const getSignedUrl = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const agent = await prisma.agent.findUnique({ where: { businessId } });
   if (!agent?.elevenlabsAgentId) throw ApiError.notFound('Agent not configured — complete onboarding first');
 

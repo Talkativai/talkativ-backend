@@ -6,8 +6,10 @@ import * as elevenlabs from '../services/elevenlabs.service.js';
 import * as twilioService from '../services/twilio.service.js';
 
 export const getBusiness = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const business = await prisma.business.findUnique({
-    where: { userId: req.user!.userId },
+    where: { id: businessId },
     include: { orderingPolicy: true, reservationPolicy: true, notifSettings: true, phoneConfig: true },
   });
   if (!business) throw ApiError.notFound('Business not found');
@@ -15,30 +17,30 @@ export const getBusiness = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const updateBusiness = asyncHandler(async (req: Request, res: Response) => {
-  const business = await prisma.business.findUnique({ where: { userId: req.user!.userId } });
-  if (!business) throw ApiError.notFound('Business not found');
-
-  const updated = await prisma.business.update({
-    where: { id: business.id },
-    data: req.body,
-  });
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
+  const updated = await prisma.business.update({ where: { id: businessId }, data: req.body });
   res.json(updated);
 });
 
 export const updateOnboarding = asyncHandler(async (req: Request, res: Response) => {
-  const business = await prisma.business.findUnique({ where: { userId: req.user!.userId } });
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
+  const business = await prisma.business.findUnique({ where: { id: businessId } });
   if (!business) throw ApiError.notFound('Business not found');
 
   const updated = await prisma.business.update({
-    where: { id: business.id },
+    where: { id: businessId },
     data: { ...req.body, onboardingStep: Math.max(business.onboardingStep, 2) },
   });
   res.json(updated);
 });
 
 export const completeOnboarding = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const business = await prisma.business.findUnique({
-    where: { userId: req.user!.userId },
+    where: { id: businessId },
     include: { agent: true },
   });
   if (!business) throw ApiError.notFound('Business not found');
@@ -147,7 +149,9 @@ export const completeOnboarding = asyncHandler(async (req: Request, res: Respons
 
 // ─── Phone setup during onboarding ───────────────────────────────────────────
 export const setupPhone = asyncHandler(async (req: Request, res: Response) => {
-  const business = await prisma.business.findUnique({ where: { userId: req.user!.userId } });
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
+  const business = await prisma.business.findUnique({ where: { id: businessId } });
   if (!business) throw ApiError.notFound('Business not found');
 
   const { mode, countryCode } = req.body as { mode: 'forward' | 'new'; countryCode?: string };
@@ -164,9 +168,9 @@ export const setupPhone = asyncHandler(async (req: Request, res: Response) => {
 
   // Upsert PhoneConfig with the assigned number (null if free tier or forward mode)
   const config = await prisma.phoneConfig.upsert({
-    where: { businessId: business.id },
+    where: { businessId },
     update: { ...(mode === 'new' ? { assignedNumber } : {}) },
-    create: { businessId: business.id, assignedNumber: mode === 'new' ? assignedNumber : null },
+    create: { businessId, assignedNumber: mode === 'new' ? assignedNumber : null },
   });
 
   res.json({ assignedNumber: config.assignedNumber });

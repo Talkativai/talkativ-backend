@@ -5,20 +5,16 @@ import prisma from '../config/db.js';
 import * as stripeService from '../services/stripe.service.js';
 import { env } from '../config/env.js';
 
-const getBusinessId = async (userId: string) => {
-  const biz = await prisma.business.findUnique({ where: { userId } });
-  if (!biz) throw ApiError.notFound('Business not found');
-  return biz.id;
-};
-
 export const getBilling = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const subscription = await prisma.subscription.findUnique({ where: { businessId } });
   res.json(subscription || { plan: 'NONE', status: 'NO_SUBSCRIPTION' });
 });
 
 export const getInvoices = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const subscription = await prisma.subscription.findUnique({ where: { businessId } });
   if (!subscription) return res.json([]);
 
@@ -30,7 +26,8 @@ export const getInvoices = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const subscribe = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
   if (!user) throw ApiError.notFound('User not found');
 
@@ -62,7 +59,8 @@ export const subscribe = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const changePlan = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const subscription = await prisma.subscription.findUnique({ where: { businessId } });
   if (!subscription?.stripeSubscriptionId) throw ApiError.badRequest('No active subscription');
 
@@ -76,7 +74,8 @@ export const changePlan = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const cancelSubscription = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const subscription = await prisma.subscription.findUnique({ where: { businessId } });
   if (!subscription?.stripeSubscriptionId) throw ApiError.badRequest('No active subscription');
 
@@ -90,7 +89,8 @@ export const cancelSubscription = asyncHandler(async (req: Request, res: Respons
 });
 
 export const getPortal = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const subscription = await prisma.subscription.findUnique({ where: { businessId } });
   if (!subscription?.stripeCustomerId) throw ApiError.badRequest('No Stripe customer');
 

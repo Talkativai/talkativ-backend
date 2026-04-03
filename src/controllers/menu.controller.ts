@@ -35,14 +35,9 @@ const buildCategorizedResponse = (
   };
 };
 
-const getBusinessId = async (userId: string) => {
-  const biz = await prisma.business.findUnique({ where: { userId } });
-  if (!biz) throw ApiError.notFound('Business not found');
-  return biz.id;
-};
-
 export const getCategories = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const categories = await prisma.menuCategory.findMany({
     where: { businessId },
     include: { _count: { select: { items: true } } },
@@ -60,7 +55,8 @@ export const getCategoryItems = asyncHandler(async (req: Request, res: Response)
 });
 
 export const createCategory = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const { name } = req.body as { name: string };
   if (!name?.trim()) throw ApiError.badRequest('Category name is required');
   const existing = await prisma.menuCategory.findFirst({ where: { businessId, name: { equals: name.trim(), mode: 'insensitive' } } });
@@ -100,7 +96,8 @@ export const deleteItem = asyncHandler(async (req: Request, res: Response) => {
 
 // ─── Import from URL (Gemini-powered web scraping) ──────────────────────────
 export const importFromUrl = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const { url } = req.body;
 
   if (!url) throw ApiError.badRequest('URL is required');
@@ -130,7 +127,8 @@ export const importFromUrl = asyncHandler(async (req: Request, res: Response) =>
 // ─── Import from PDF (Google Vision OCR) ────────────────────────────────────
 export const importFromPdf = asyncHandler(async (req: Request, res: Response) => {
   if (!req.file) throw ApiError.badRequest('No file uploaded');
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const fileName = req.file.originalname || req.file.filename;
 
   const result = await extractionService.extractFromPdf(businessId, req.file.path, fileName);
@@ -144,7 +142,8 @@ export const importFromPdf = asyncHandler(async (req: Request, res: Response) =>
 // ─── Import from Image (Google Vision OCR) ──────────────────────────────────
 export const importFromImage = asyncHandler(async (req: Request, res: Response) => {
   if (!req.file) throw ApiError.badRequest('No image uploaded');
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const fileName = req.file.originalname || req.file.filename;
 
   const result = await extractionService.extractFromImage(businessId, req.file.path, fileName, req.file.mimetype);
@@ -158,7 +157,8 @@ export const importFromImage = asyncHandler(async (req: Request, res: Response) 
 // ─── Unified file import (PDF / DOCX / PNG) ─────────────────────────────────
 export const importFromFile = asyncHandler(async (req: Request, res: Response) => {
   if (!req.file) throw ApiError.badRequest('No file uploaded');
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const mime = req.file.mimetype;
   const fileName = req.file.originalname || req.file.filename;
 
@@ -229,7 +229,8 @@ async function fetchMenuFromPos(
 
 // ─── Import from POS ─────────────────────────────────────────────────────────
 export const importFromPos = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const { posSystem, credentials } = req.body as { posSystem: PosSystem; credentials: Record<string, string> };
 
   // Validate required credential fields for this POS
@@ -264,7 +265,8 @@ export const importFromPos = asyncHandler(async (req: Request, res: Response) =>
 // ─── FAQ ─────────────────────────────────────────────────────────────────────
 
 export const listFaqs = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const faqs = await prisma.faq.findMany({
     where: { businessId },
     orderBy: { position: 'asc' },
@@ -273,7 +275,8 @@ export const listFaqs = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const createFaq = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const { question, answer } = req.body;
   if (!question || !answer) throw ApiError.badRequest('Question and answer are required');
 
@@ -290,7 +293,8 @@ export const createFaq = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const updateFaq = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const { id } = req.params;
   const { question, answer } = req.body;
 
@@ -305,7 +309,8 @@ export const updateFaq = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const deleteFaq = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const { id } = req.params;
 
   const existing = await prisma.faq.findFirst({ where: { id, businessId } });

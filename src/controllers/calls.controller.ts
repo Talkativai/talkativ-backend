@@ -5,14 +5,9 @@ import prisma from '../config/db.js';
 import * as analytics from '../services/analytics.service.js';
 import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE } from '../utils/constants.js';
 
-const getBusinessId = async (userId: string) => {
-  const biz = await prisma.business.findUnique({ where: { userId } });
-  if (!biz) throw ApiError.notFound('Business not found');
-  return biz.id;
-};
-
 export const listCalls = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const page = parseInt(req.query.page as string) || DEFAULT_PAGE;
   const limit = parseInt(req.query.limit as string) || DEFAULT_PAGE_SIZE;
   const filter = req.query.filter as string; // All, Orders, Enquiries, Missed
@@ -48,20 +43,23 @@ export const listCalls = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const getCall = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const call = await prisma.call.findFirst({ where: { id: req.params.id, businessId }, include: { order: true } });
   if (!call) throw ApiError.notFound('Call not found');
   res.json(call);
 });
 
 export const getCallStats = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const stats = await analytics.getCallStats(businessId);
   res.json(stats);
 });
 
 export const exportCalls = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const calls = await prisma.call.findMany({ where: { businessId }, orderBy: { createdAt: 'desc' } });
   const csv = ['ID,Caller,Phone,Status,Outcome,Duration,Date',
     ...calls.map(c => `${c.id},${c.callerName || ''},${c.callerPhone || ''},${c.status},${c.outcome || ''},${c.duration || ''},${c.createdAt.toISOString()}`)

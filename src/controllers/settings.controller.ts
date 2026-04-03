@@ -7,16 +7,12 @@ import * as emailService from '../services/email.service.js';
 import * as elevenlabs from '../services/elevenlabs.service.js';
 import crypto from 'crypto';
 
-const getBusinessId = async (userId: string) => {
-  const biz = await prisma.business.findUnique({ where: { userId } });
-  if (!biz) throw ApiError.notFound('Business not found');
-  return biz.id;
-};
-
 // ─── Business Settings ───────────────────────────────────────────────────────
 export const getBusinessSettings = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const business = await prisma.business.findUnique({
-    where: { userId: req.user!.userId },
+    where: { id: businessId },
     include: { orderingPolicy: true, reservationPolicy: true },
   });
   if (!business) throw ApiError.notFound('Business not found');
@@ -24,21 +20,23 @@ export const getBusinessSettings = asyncHandler(async (req: Request, res: Respon
 });
 
 export const updateBusinessSettings = asyncHandler(async (req: Request, res: Response) => {
-  const business = await prisma.business.findUnique({ where: { userId: req.user!.userId } });
-  if (!business) throw ApiError.notFound('Business not found');
-  const updated = await prisma.business.update({ where: { id: business.id }, data: req.body });
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
+  const updated = await prisma.business.update({ where: { id: businessId }, data: req.body });
   res.json(updated);
 });
 
 // ─── Notification Settings ───────────────────────────────────────────────────
 export const getNotifications = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const settings = await prisma.notificationSettings.findUnique({ where: { businessId } });
   res.json(settings || { emailNewOrder: true, emailMissedCall: true, emailDailySummary: true, pushLiveCall: true, pushNewOrder: true });
 });
 
 export const updateNotifications = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const settings = await prisma.notificationSettings.upsert({
     where: { businessId },
     update: req.body,
@@ -49,13 +47,15 @@ export const updateNotifications = asyncHandler(async (req: Request, res: Respon
 
 // ─── Phone Config ────────────────────────────────────────────────────────────
 export const getPhoneConfig = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const config = await prisma.phoneConfig.findUnique({ where: { businessId } });
   res.json(config || { assignedNumber: null, forwardNumber: null, ringsBeforeAi: 0 });
 });
 
 export const updatePhoneConfig = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const config = await prisma.phoneConfig.upsert({
     where: { businessId },
     update: req.body,
@@ -106,13 +106,15 @@ export const revokeSession = asyncHandler(async (req: Request, res: Response) =>
 
 // ─── Ordering Policy ─────────────────────────────────────────────────────────
 export const getOrderingPolicy = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const policy = await prisma.orderingPolicy.findUnique({ where: { businessId } });
   res.json(policy || { deliveryEnabled: false, collectionEnabled: false, deliveryRadius: 5, deliveryRadiusUnit: 'miles', minOrderAmount: 0, payNowEnabled: true, payOnDelivery: true, collectionPayNow: false, collectionPayOnPickup: false, deliveryPayNow: false, deliveryPayOnDelivery: false, deliveryFee: 0 });
 });
 
 export const updateOrderingPolicy = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const policy = await prisma.orderingPolicy.upsert({
     where: { businessId },
     update: req.body,
@@ -123,13 +125,15 @@ export const updateOrderingPolicy = asyncHandler(async (req: Request, res: Respo
 
 // ─── Reservation Policy ──────────────────────────────────────────────────────
 export const getReservationPolicy = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const policy = await prisma.reservationPolicy.findUnique({ where: { businessId } });
   res.json(policy || { depositRequired: false, depositAmount: 0, depositType: 'PER_GUEST', maxPartySize: 20, bookingLeadTime: 24, cancellationHours: 24 });
 });
 
 export const updateReservationPolicy = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const policy = await prisma.reservationPolicy.upsert({
     where: { businessId },
     update: req.body,
@@ -140,7 +144,8 @@ export const updateReservationPolicy = asyncHandler(async (req: Request, res: Re
 
 // ─── Staff Management ────────────────────────────────────────────────────────
 export const getStaff = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const staff = await prisma.staff.findMany({
     where: { businessId },
     select: {
@@ -159,7 +164,8 @@ export const getStaff = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const createStaff = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const { firstName, lastName, email, role } = req.body;
 
   // Auto-generate unique username: firstname.lastname + 4 random digits
@@ -198,7 +204,8 @@ export const createStaff = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const updateStaff = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const { id } = req.params;
 
   const staff = await prisma.staff.findFirst({ where: { id, businessId } });
@@ -231,7 +238,8 @@ export const updateStaff = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const deleteStaff = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = await getBusinessId(req.user!.userId);
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
   const { id } = req.params;
 
   const staff = await prisma.staff.findFirst({ where: { id, businessId } });
@@ -286,12 +294,15 @@ export const verifyOtp = asyncHandler(async (req: Request, res: Response) => {
 // ─── Delete Account ───────────────────────────────────────────────────────────
 export const deleteAccount = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.userId;
+  const businessId = req.user!.businessId;
 
   // Find the business and its agent (if any)
-  const business = await prisma.business.findUnique({
-    where: { userId },
-    include: { agent: { select: { id: true, elevenlabsAgentId: true } } },
-  });
+  const business = businessId
+    ? await prisma.business.findUnique({
+        where: { id: businessId },
+        include: { agent: { select: { id: true, elevenlabsAgentId: true } } },
+      })
+    : null;
 
   // Delete ElevenLabs agent before removing the DB record
   if (business?.agent?.elevenlabsAgentId) {
