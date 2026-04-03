@@ -3,9 +3,11 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
+import hpp from 'hpp';
 import { env } from './config/env.js';
-import { apiLimiter } from './middleware/rateLimiter.js';
+import { apiLimiter, searchLimiter } from './middleware/rateLimiter.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { xss } from './middleware/xss.js';
 
 // Route imports
 import authRoutes from './routes/auth.routes.js';
@@ -33,8 +35,13 @@ app.use(helmet());
 app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
 app.use(morgan('dev'));
 app.use(cookieParser());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Limit body payload to 10kb to prevent denial of service by large payloads
+app.use(express.json({ limit: '10kb' }));
+app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+// Data sanitization against NoSQL query injection / XSS
+app.use(xss);
+// Prevent HTTP parameter pollution
+app.use(hpp());
 
 // ─── Health Check ────────────────────────────────────────────────────────────
 app.get('/', (_req, res) => {
@@ -65,7 +72,7 @@ import * as claudeSearch from './services/claude-search.service.js';
 import * as twilioService from './services/twilio.service.js';
 import { rateLimit } from 'express-rate-limit';
 
-app.get('/api/public/search-business', apiLimiter, async (req, res) => {
+app.get('/api/public/search-business', searchLimiter, async (req, res) => {
   const query = req.query.q as string;
   if (!query || query.length < 2) {
     res.json({ results: [] });

@@ -24,3 +24,11 @@ export const webhookLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+export const searchLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 mins
+  max: 10, // strict limit for public unauth search to avoid scraper bots
+  message: { error: 'Too many search requests. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
