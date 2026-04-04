@@ -65,6 +65,9 @@ const envSchema = z.object({
 
   // ElevenLabs demo agent
   ELEVENLABS_DEMO_AGENT_ID: z.string().default(''),
+
+  // Foursquare Places API
+  FOURSQUARE_API_KEY: z.string().default(''),
 });
 
 const parsed = envSchema.safeParse(process.env);

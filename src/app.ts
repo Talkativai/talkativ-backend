@@ -71,7 +71,7 @@ app.use('/webhooks', webhookRoutes);
 app.use('/api/public', webhookRoutes);
 
 // ─── Public Business Search (for onboarding, no auth needed) ─────────────────
-import * as claudeSearch from './services/claude-search.service.js';
+import * as foursquareSearch from './services/foursquare-search.service.js';
 import * as twilioService from './services/twilio.service.js';
 import { rateLimit } from 'express-rate-limit';
 
@@ -82,7 +82,7 @@ app.get('/api/public/search-business', searchLimiter, async (req, res) => {
     return;
   }
   try {
-    const results = await claudeSearch.searchBusinesses(query);
+    const results = await foursquareSearch.searchBusinesses(query);
     res.json({ results });
   } catch (err: any) {
     console.error('Business search error:', err);

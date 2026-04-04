@@ -1,9 +1,10 @@
+// ─── Claude-powered Business Search — DISABLED ──────────────────────────────
+// Replaced by Foursquare Places API (foursquare-search.service.ts)
+// Kept for reference only.
+
+/*
 import Anthropic from '@anthropic-ai/sdk';
 import { env } from '../config/env.js';
-
-// ─── Claude-powered Business Search ────────────────────────────────────────
-// Uses Claude to look up real business information based on a name query.
-// Returns structured data: name, address, phone, hours, category.
 
 const getClient = () => {
   if (!env.ANTHROPIC_API_KEY) return null;
@@ -49,13 +50,11 @@ Example format:
       ],
     });
 
-    // Extract text content from Claude's response
     const textBlock = message.content.find((b: any) => b.type === 'text');
     if (!textBlock || textBlock.type !== 'text') return [];
 
     let rawText = textBlock.text.trim();
 
-    // Remove any markdown code fences if Claude added them
     if (rawText.startsWith('```')) {
       rawText = rawText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
     }
@@ -69,10 +68,11 @@ Example format:
       phone: biz.phone || '',
       hours: biz.hours || '',
       category: biz.category || '',
-      placeId: `claude-${i}-${Date.now()}`, // synthetic ID
+      placeId: `claude-${i}-${Date.now()}`,
     }));
   } catch (err: any) {
     console.error('Claude business search error:', err.message || err);
     return [];
   }
 };
+*/
