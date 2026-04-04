@@ -39,7 +39,7 @@ export const searchBusinesses = async (query: string): Promise<BusinessResult[]>
       return [];
     }
 
-    const data = await response.json();
+    const data = await response.json() as { results?: any[] };
 
     return (data.results || []).map((place: any) => ({
       name: place.name || query,
