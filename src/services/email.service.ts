@@ -39,9 +39,15 @@ export const sendWelcomeEmail = async (to: string, firstName: string) => {
     to: [to],
     subject: 'Welcome to Talkativ! 🎉',
     html: `
-      <h1>Welcome, ${firstName}!</h1>
-      <p>Thanks for signing up for Talkativ. Your AI phone agent is ready to set up.</p>
-      <p>Complete your onboarding to get started.</p>
+      <div style="font-family:'Segoe UI',sans-serif;max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:16px;overflow:hidden;">
+        <div style="background:linear-gradient(135deg,#7035f5,#4b1ab5);padding:32px 36px;">
+          <h1 style="color:white;margin:0;font-size:24px;font-weight:800;letter-spacing:-.5px;">Welcome, ${firstName}! 🎉</h1>
+          <p style="color:rgba(255,255,255,.8);margin:10px 0 0;font-size:14px;">Thanks for signing up for Talkativ.</p>
+        </div>
+        <div style="padding:32px 36px;">
+          <p style="color:#2d2150;font-size:15px;line-height:1.6;margin:0 0 24px;">Your AI phone agent is ready to set up. Complete your onboarding to get started and deploy your agent in minutes.</p>
+        </div>
+      </div>
     `,
   });
 };
@@ -52,10 +58,16 @@ export const sendPasswordResetEmail = async (to: string, resetUrl: string) => {
     to: [to],
     subject: 'Reset your password — Talkativ',
     html: `
-      <h1>Password Reset</h1>
-      <p>Click the link below to reset your password:</p>
-      <a href="${resetUrl}">${resetUrl}</a>
-      <p>This link expires in 1 hour.</p>
+      <div style="font-family:'Segoe UI',sans-serif;max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:16px;overflow:hidden;">
+        <div style="background:#f8f6ff;padding:32px 36px;border-bottom:1px solid #ece5ff;">
+          <h1 style="color:#130d2e;margin:0;font-size:20px;font-weight:700;">Password Reset</h1>
+        </div>
+        <div style="padding:32px 36px;">
+          <p style="color:#2d2150;font-size:15px;line-height:1.6;margin:0 0 24px;">Someone requested a password reset for your Talkativ account. Click the button below to set a new password.</p>
+          <a href="${resetUrl}" style="display:inline-block;background:#7035f5;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;text-align:center;">Reset Password</a>
+          <p style="color:#9e92ba;font-size:13px;margin:24px 0 0;">This link will expire in 1 hour. If you didn't request this, you can safely ignore this email.</p>
+        </div>
+      </div>
     `,
   });
 };
@@ -66,10 +78,28 @@ export const sendOrderConfirmation = async (to: string, order: { id: string; ite
     to: [to],
     subject: `Order Confirmed — #${order.id.slice(0, 8)}`,
     html: `
-      <h1>New Order Placed</h1>
-      <p><strong>Order ID:</strong> ${order.id.slice(0, 8)}</p>
-      <p><strong>Items:</strong> ${order.items}</p>
-      <p><strong>Total:</strong> £${order.amount}</p>
+      <div style="font-family:'Segoe UI',sans-serif;max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:16px;overflow:hidden;">
+        <div style="background:#f2ebfa;padding:32px 36px;border-bottom:1px solid #e1d6f5;">
+          <h1 style="color:#2d2150;margin:0;font-size:20px;font-weight:700;">Order Confirmed</h1>
+          <p style="color:#574c76;font-size:14px;margin:4px 0 0;">Thank you for your order!</p>
+        </div>
+        <div style="padding:32px 36px;">
+          <div style="background:#f8f6ff;border:1.5px solid #ece5ff;border-radius:12px;padding:20px 24px;">
+            <div style="margin-bottom:12px;display:flex;justify-content:space-between;">
+              <span style="font-size:14px;color:#6b5e8a;">Order ID</span>
+              <strong style="font-size:14px;color:#130d2e;">#${order.id.slice(0, 8)}</strong>
+            </div>
+            <div style="margin-bottom:12px;display:flex;justify-content:space-between;border-top:1px solid #ece5ff;padding-top:12px;">
+              <span style="font-size:14px;color:#6b5e8a;">Items</span>
+              <span style="font-size:14px;color:#130d2e;text-align:right;max-width:200px;">${order.items}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;border-top:1px solid #ece5ff;padding-top:12px;">
+              <strong style="font-size:15px;color:#130d2e;">Total</strong>
+              <strong style="font-size:15px;color:#7035f5;">£${order.amount}</strong>
+            </div>
+          </div>
+        </div>
+      </div>
     `,
   });
 };
@@ -80,9 +110,15 @@ export const sendMissedCallAlert = async (to: string, callerPhone: string) => {
     to: [to],
     subject: 'Missed Call Alert — Talkativ',
     html: `
-      <h1>Missed Call</h1>
-      <p>You missed a call from <strong>${callerPhone}</strong>.</p>
-      <p>Check your dashboard for more details.</p>
+      <div style="font-family:'Segoe UI',sans-serif;max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:16px;overflow:hidden;">
+        <div style="background:#fef2f2;padding:32px 36px;border-bottom:1px solid #fecaca;">
+          <h1 style="color:#991b1b;margin:0;font-size:20px;font-weight:700;">Missed Call Alert</h1>
+        </div>
+        <div style="padding:32px 36px;">
+          <p style="color:#2d2150;font-size:15px;line-height:1.6;margin:0 0 24px;">You just missed a call from <strong>${callerPhone}</strong>.</p>
+          <p style="color:#6b5e8a;font-size:14px;margin:0;">Log in to your Talkativ dashboard to view call details or listen to voicemails.</p>
+        </div>
+      </div>
     `,
   });
 };
@@ -93,10 +129,24 @@ export const sendPaymentReceipt = async (to: string, amount: string, date: strin
     to: [to],
     subject: 'Payment Receipt — Talkativ',
     html: `
-      <h1>Payment Received</h1>
-      <p><strong>Amount:</strong> £${amount}</p>
-      <p><strong>Date:</strong> ${date}</p>
-      <p>Thank you for your payment.</p>
+      <div style="font-family:'Segoe UI',sans-serif;max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:16px;overflow:hidden;">
+        <div style="background:#f0fdf4;padding:32px 36px;border-bottom:1px solid #bbf7d0;">
+          <h1 style="color:#166534;margin:0;font-size:20px;font-weight:700;">Payment Receipt</h1>
+          <p style="color:#15803d;font-size:14px;margin:4px 0 0;">Thank you for your payment!</p>
+        </div>
+        <div style="padding:32px 36px;">
+          <div style="background:#f8f6ff;border:1.5px solid #ece5ff;border-radius:12px;padding:20px 24px;">
+            <div style="margin-bottom:12px;display:flex;justify-content:space-between;">
+              <span style="font-size:14px;color:#6b5e8a;">Amount</span>
+              <strong style="font-size:15px;color:#130d2e;">£${amount}</strong>
+            </div>
+            <div style="display:flex;justify-content:space-between;border-top:1px solid #ece5ff;padding-top:12px;">
+              <span style="font-size:14px;color:#6b5e8a;">Date</span>
+              <span style="font-size:14px;color:#130d2e;">${date}</span>
+            </div>
+          </div>
+        </div>
+      </div>
     `,
   });
 };
@@ -107,9 +157,15 @@ export const sendTrialEndingEmail = async (to: string, daysLeft: number) => {
     to: [to],
     subject: `Your trial ends in ${daysLeft} days — Talkativ`,
     html: `
-      <h1>Trial Ending Soon</h1>
-      <p>Your Talkativ trial ends in <strong>${daysLeft} days</strong>.</p>
-      <p>Upgrade your plan to keep your AI agent running.</p>
+      <div style="font-family:'Segoe UI',sans-serif;max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:16px;overflow:hidden;">
+        <div style="background:#fffbeb;padding:32px 36px;border-bottom:1px solid #fde68a;">
+          <h1 style="color:#92400e;margin:0;font-size:20px;font-weight:700;">Trial Ending Soon</h1>
+        </div>
+        <div style="padding:32px 36px;">
+          <p style="color:#2d2150;font-size:15px;line-height:1.6;margin:0 0 24px;">Your Talkativ trial will expire in <strong>${daysLeft} days</strong>.</p>
+          <p style="color:#6b5e8a;font-size:14px;margin:0;">To keep your AI agent running and answering calls without interruption, please upgrade your plan in your dashboard.</p>
+        </div>
+      </div>
     `,
   });
 };
@@ -120,12 +176,21 @@ export const sendPasswordChangeAlert = async (to: string, firstName: string, rec
     to: [to],
     subject: 'Your password was changed — Talkativ',
     html: `
-      <h1>Password Changed</h1>
-      <p>Hi ${firstName}, your Talkativ account password was just changed.</p>
-      <p>If this was you, no action is needed.</p>
-      <p>If you did not make this change, reset your password immediately:</p>
-      <a href="${recoveryUrl}" style="display:inline-block;background:#7035f5;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">Reset Password</a>
-      <p style="margin-top:16px;font-size:12px;color:#888;">This link expires in 1 hour.</p>
+      <div style="font-family:'Segoe UI',sans-serif;max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:16px;overflow:hidden;">
+        <div style="background:#f8f6ff;padding:32px 36px;border-bottom:1px solid #ece5ff;">
+          <h1 style="color:#130d2e;margin:0;font-size:20px;font-weight:700;">Password Changed</h1>
+        </div>
+        <div style="padding:32px 36px;">
+          <p style="color:#2d2150;font-size:15px;line-height:1.6;margin:0 0 16px;">Hi ${firstName}, the password for your Talkativ account was just changed.</p>
+          <p style="color:#2d2150;font-size:15px;line-height:1.6;margin:0 0 24px;">If this was you, no further action is needed.</p>
+          <div style="background:#fef2f2;border-radius:12px;padding:20px;margin-bottom:24px;">
+            <p style="color:#991b1b;font-size:14px;margin:0 0 16px;font-weight:600;">Didn't make this change?</p>
+            <p style="color:#7f1d1d;font-size:14px;margin:0 0 16px;">Reset your password immediately to secure your account.</p>
+            <a href="${recoveryUrl}" style="display:inline-block;background:#ef4444;color:white;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600;font-size:13px;">Secure My Account</a>
+          </div>
+          <p style="color:#9e92ba;font-size:12px;margin:0;">This recovery link expires in 1 hour.</p>
+        </div>
+      </div>
     `,
   });
 };
@@ -136,11 +201,19 @@ export const sendOtpEmail = async (to: string, firstName: string, code: string) 
     to: [to],
     subject: `Your Talkativ verification code: ${code}`,
     html: `
-      <h1>Verification Code</h1>
-      <p>Hi ${firstName}, here is your 6-digit verification code:</p>
-      <div style="font-size:36px;font-weight:900;letter-spacing:12px;color:#7035f5;margin:24px 0;">${code}</div>
-      <p>This code expires in 10 minutes.</p>
-      <p>If you did not request this, please ignore this email.</p>
+      <div style="font-family:'Segoe UI',sans-serif;max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:16px;overflow:hidden;">
+        <div style="background:#f8f6ff;padding:32px 36px;border-bottom:1px solid #ece5ff;">
+          <h1 style="color:#130d2e;margin:0;font-size:20px;font-weight:700;">Verification Code</h1>
+        </div>
+        <div style="padding:32px 36px;">
+          <p style="color:#2d2150;font-size:15px;line-height:1.6;margin:0 0 24px;">Hi ${firstName}, here is your 6-digit verification code:</p>
+          <div style="background:#f5f2ff;border:1px dashed #bba8ff;border-radius:12px;padding:24px;text-align:center;margin-bottom:24px;">
+            <div style="font-size:40px;font-weight:900;letter-spacing:12px;color:#7035f5;font-family:monospace;">${code}</div>
+          </div>
+          <p style="color:#6b5e8a;font-size:13px;margin:0 0 8px;">This code expires in 10 minutes.</p>
+          <p style="color:#9e92ba;font-size:13px;margin:0;">If you did not request this code, please ignore this email.</p>
+        </div>
+      </div>
     `,
   });
 };
@@ -181,11 +254,29 @@ export const sendRefundRequestAlert = async (to: string, guestName: string, rese
     to: [to],
     subject: `Refund request — ${guestName}`,
     html: `
-      <h1>Reservation Refund Request</h1>
-      <p><strong>Guest:</strong> ${guestName}</p>
-      <p><strong>Reservation ID:</strong> ${reservationId.slice(0, 8)}</p>
-      <p><strong>Refund amount:</strong> £${amount}</p>
-      <p>Log in to your Talkativ dashboard to process this refund.</p>
+      <div style="font-family:'Segoe UI',sans-serif;max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:16px;overflow:hidden;">
+        <div style="background:#fffbeb;padding:32px 36px;border-bottom:1px solid #fde68a;">
+          <h1 style="color:#92400e;margin:0;font-size:20px;font-weight:700;">Refund Request</h1>
+          <p style="color:#b45309;font-size:14px;margin:4px 0 0;">A guest requested a reservation refund.</p>
+        </div>
+        <div style="padding:32px 36px;">
+          <div style="background:#fefce8;border:1.5px solid #fef08a;border-radius:12px;padding:20px 24px;margin-bottom:24px;">
+            <div style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">
+              <span style="font-size:14px;color:#854d0e;">Guest</span>
+              <strong style="font-size:14px;color:#422006;">${guestName}</strong>
+            </div>
+            <div style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;border-top:1px solid #fef08a;padding-top:12px;">
+              <span style="font-size:14px;color:#854d0e;">Reservation ID</span>
+              <span style="font-size:14px;color:#422006;">#${reservationId.slice(0, 8)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #fef08a;padding-top:12px;">
+              <strong style="font-size:15px;color:#422006;">Refund Amount</strong>
+              <strong style="font-size:15px;color:#ef4444;">£${amount}</strong>
+            </div>
+          </div>
+          <p style="color:#6b5e8a;font-size:14px;margin:0;">Log in to your Talkativ dashboard to review and process this refund.</p>
+        </div>
+      </div>
     `,
   });
 };
