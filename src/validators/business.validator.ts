@@ -19,5 +19,7 @@ export const onboardingBusinessSchema = z.object({
   type: z.string().min(1, 'Business type is required'),
   address: z.string().min(1, 'Address is required'),
   phone: z.string().min(1, 'Phone number is required'),
+  country: z.string().optional(),
+  currency: z.string().optional(),
   openingHours: z.record(z.union([z.string(), z.object({ is24h: z.string().optional(), open: z.boolean().optional(), openTime: z.string().optional(), closeTime: z.string().optional() })])).optional(),
 });

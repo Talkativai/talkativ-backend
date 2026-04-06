@@ -8,7 +8,7 @@ export const updateAgentSchema = z.object({
   voiceDescription: z.string().optional(),
   openingGreeting: z.string().optional(),
   closingMessage: z.string().optional(),
-  transferNumber: z.string().optional(),
+  transferNumber: z.string().nullable().optional(),
   transferEnabled: z.boolean().optional(),
   takeMessages: z.boolean().optional(),
   acceptOrders: z.boolean().optional(),
@@ -30,7 +30,7 @@ export const updateScriptSchema = z.object({
 });
 
 export const updateCallRulesSchema = z.object({
-  transferNumber: z.string().optional(),
+  transferNumber: z.string().nullable().optional(),
   transferEnabled: z.boolean().optional(),
   takeMessages: z.boolean().optional(),
   answerAfterHours: z.boolean().optional(),
