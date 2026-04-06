@@ -13,6 +13,7 @@ router.use(authenticate);
 
 router.get('/', agentController.getAgent);
 router.put('/', validate(updateAgentSchema), agentController.updateAgent);
+router.post('/rebuild-prompt', agentController.rebuildSystemPrompt);
 router.get('/transcripts', agentController.getTranscripts);
 router.get('/transcripts/:id', agentController.getTranscriptById);
 router.post('/test-call', agentController.testCall);

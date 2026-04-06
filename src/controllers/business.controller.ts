@@ -80,10 +80,15 @@ export const completeOnboarding = asyncHandler(async (req: Request, res: Respons
         || `Thank you for calling ${updated.name}, this is ${agentName}. How can I help you today?`;
 
       // Fetch FAQs, ordering policy and reservation policy
-      const [faqs, orderingPolicy, reservationPolicy] = await Promise.all([
+      const [faqs, orderingPolicy, reservationPolicy, menuCategories] = await Promise.all([
         prisma.faq.findMany({ where: { businessId: business.id }, orderBy: { position: 'asc' } }),
         prisma.orderingPolicy.findUnique({ where: { businessId: business.id } }),
         prisma.reservationPolicy.findUnique({ where: { businessId: business.id } }),
+        prisma.menuCategory.findMany({
+          where: { businessId: business.id },
+          include: { items: { where: { status: 'ACTIVE' }, orderBy: { name: 'asc' } } },
+          orderBy: { sortOrder: 'asc' },
+        }),
       ]);
 
       const systemPrompt = elevenlabs.buildSystemPrompt({
@@ -97,6 +102,7 @@ export const completeOnboarding = asyncHandler(async (req: Request, res: Respons
         faqs,
         orderingPolicy,
         reservationPolicy,
+        menuCategories,
         agent: {
           transferEnabled: business.agent?.transferEnabled ?? true,
           transferNumber: business.agent?.transferNumber ?? updated.phone ?? undefined,

@@ -33,6 +33,11 @@ export const updateAgent = asyncHandler(async (req: Request, res: Response) => {
   // If no ElevenLabs agent exists yet, create one with all four tools registered
   if (!agent.elevenlabsAgentId) {
     try {
+      const menuCategories = await prisma.menuCategory.findMany({
+        where: { businessId: business.id },
+        include: { items: { where: { status: 'ACTIVE' }, orderBy: { name: 'asc' } } },
+        orderBy: { sortOrder: 'asc' },
+      });
       const systemPrompt = elevenlabs.buildSystemPrompt({
         name: business.name,
         type: business.type || 'restaurant',
@@ -41,6 +46,7 @@ export const updateAgent = asyncHandler(async (req: Request, res: Response) => {
         agentName: agent.name,
         transferNumber: agent.transferNumber ?? undefined,
         greeting: agent.openingGreeting,
+        menuCategories,
       });
       const created = await elevenlabs.createAgent({
         name: agent.name,
@@ -191,6 +197,59 @@ export const getSignedUrl = asyncHandler(async (req: Request, res: Response) => 
   }
   const { signed_url } = await r.json() as { signed_url: string };
   res.json({ signedUrl: signed_url });
+});
+
+// ─── Rebuild system prompt (push latest menu + settings to ElevenLabs) ────────
+export const rebuildSystemPrompt = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
+
+  const [business, agent, menuCategories, faqs, orderingPolicy, reservationPolicy] = await Promise.all([
+    prisma.business.findUnique({ where: { id: businessId }, include: { agent: true } }),
+    prisma.agent.findUnique({ where: { businessId } }),
+    prisma.menuCategory.findMany({
+      where: { businessId },
+      include: { items: { where: { status: 'ACTIVE' }, orderBy: { name: 'asc' } } },
+      orderBy: { sortOrder: 'asc' },
+    }),
+    prisma.faq.findMany({ where: { businessId }, orderBy: { position: 'asc' } }),
+    prisma.orderingPolicy.findUnique({ where: { businessId } }),
+    prisma.reservationPolicy.findUnique({ where: { businessId } }),
+  ]);
+
+  if (!business || !agent?.elevenlabsAgentId) {
+    throw ApiError.badRequest('Agent not configured — complete onboarding first');
+  }
+
+  const systemPrompt = elevenlabs.buildSystemPrompt({
+    name: business.name,
+    type: business.type,
+    address: business.address,
+    openingHours: business.openingHours,
+    agentName: agent.name,
+    greeting: agent.openingGreeting,
+    menuCategories,
+    faqs,
+    orderingPolicy,
+    reservationPolicy,
+    agent: {
+      transferEnabled: agent.transferEnabled,
+      transferNumber: agent.transferNumber ?? undefined,
+      openingGreeting: agent.openingGreeting,
+    },
+  });
+
+  // Push to ElevenLabs
+  await elevenlabs.updateAgent(agent.elevenlabsAgentId, {
+    conversation_config: {
+      agent: { prompt: { prompt: systemPrompt } },
+    },
+  });
+
+  // Save in DB so we have a record
+  await prisma.agent.update({ where: { businessId }, data: { systemPrompt } });
+
+  res.json({ success: true, menuItemCount: menuCategories.reduce((n, c) => n + c.items.length, 0) });
 });
 
 export const previewVoice = async (req: Request, res: Response) => {
