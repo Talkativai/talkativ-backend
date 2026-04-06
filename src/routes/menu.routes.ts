@@ -10,6 +10,12 @@ import { MAX_FILE_SIZE } from '../utils/constants.js';
 const upload = multer({ dest: os.tmpdir(), limits: { fileSize: MAX_FILE_SIZE } });
 
 const router = Router();
+// ─── Public Import Routes (Auth Removed) ────────────────────────────────────
+router.post('/import/url', validate(importUrlSchema), menuController.importFromUrl);
+router.post('/import/file', upload.single('file'), menuController.importFromFile);
+router.post('/import/pdf', upload.single('file'), menuController.importFromPdf);
+router.post('/import/image', upload.single('file'), menuController.importFromImage);
+
 router.use(authenticate);
 
 router.get('/categories', menuController.getCategories);
@@ -21,11 +27,6 @@ router.delete('/categories/:id', menuController.deleteCategory);
 router.post('/items', validate(createItemSchema), menuController.createItem);
 router.put('/items/:id', validate(updateItemSchema), menuController.updateItem);
 router.delete('/items/:id', menuController.deleteItem);
-
-router.post('/import/url', validate(importUrlSchema), menuController.importFromUrl);
-router.post('/import/file', upload.single('file'), menuController.importFromFile);
-router.post('/import/pdf', upload.single('file'), menuController.importFromPdf);
-router.post('/import/image', upload.single('file'), menuController.importFromImage);
 router.post('/import/pos', validate(importPosSchema), menuController.importFromPos);
 
 router.get('/faq', menuController.listFaqs);
