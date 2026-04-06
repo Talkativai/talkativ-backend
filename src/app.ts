@@ -72,6 +72,7 @@ app.use('/api/public', webhookRoutes);
 
 // ─── Public Business Search (for onboarding, no auth needed) ─────────────────
 import * as claudeSearch from './services/claude-search.service.js';
+import * as googlePlaces from './services/google-places.service.js';
 import * as twilioService from './services/twilio.service.js';
 import { rateLimit } from 'express-rate-limit';
 
@@ -82,8 +83,17 @@ app.get('/api/public/search-business', searchLimiter, async (req, res) => {
     return;
   }
   try {
-    const results = await claudeSearch.searchBusinesses(query);
-    res.json({ results });
+    // Try Google Places first (fast, accurate, current) — requires GOOGLE_PLACES_API in .env
+    if (env.GOOGLE_PLACES_API) {
+      const googleResults = await googlePlaces.searchBusinesses(query);
+      if (googleResults.length > 0) {
+        res.json({ results: googleResults, source: 'google' });
+        return;
+      }
+    }
+    // Fall back to Claude web search (no API key required beyond ANTHROPIC_API_KEY)
+    const claudeResults = await claudeSearch.searchBusinesses(query);
+    res.json({ results: claudeResults, source: 'claude' });
   } catch (err: any) {
     console.error('Business search error:', err);
     res.json({ results: [] });

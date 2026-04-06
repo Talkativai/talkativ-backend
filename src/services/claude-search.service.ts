@@ -27,23 +27,26 @@ export const searchBusinesses = async (query: string): Promise<BusinessResult[]>
 
   try {
     const response = await client.messages.create({
-      model: 'claude-opus-4-5-20251101',
-      max_tokens: 1024,
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 2048,
       tools: [{ type: 'web_search_20250305', name: 'web_search' } as any],
       messages: [
         {
           role: 'user',
-          content: `Search for the business "${query}" and return up to 5 real matching businesses. For each, provide:
-- name: full business name
-- address: full street address including city, state/region, and country
-- phone: phone number with country code (empty string if unknown)
-- hours: typical opening hours (e.g. "Mon-Fri: 9am-5pm") or empty string if unknown
-- category: type of business (e.g. "Pizza Restaurant", "Coffee Shop")
-- lat: latitude as number if available (null if unknown)
-- lng: longitude as number if available (null if unknown)
+          content: `Use web search to find real businesses matching: "${query}". Return up to 5 results.
 
-Return ONLY a valid JSON array. No markdown, no explanation, no code fences. Just the raw JSON array.
-If no businesses found, return: []`,
+For each result provide these exact fields:
+- name: full business name
+- address: full street address including city, country
+- countryCode: 2-letter ISO country code (e.g. "GB", "US", "NG") — derive from address
+- phone: phone number with country code prefix (e.g. "+44 20 1234 5678"), empty string if not found
+- hours: opening hours summary (e.g. "Mon-Fri: 9am-5pm, Sat: 10am-4pm"), empty string if unknown
+- category: business type (e.g. "Pizza Restaurant", "Coffee Shop")
+- lat: latitude as number or null
+- lng: longitude as number or null
+
+IMPORTANT: Return ONLY a raw JSON array — no markdown, no backticks, no explanation.
+If nothing found: []`,
         },
       ],
     });
@@ -67,6 +70,7 @@ If no businesses found, return: []`,
     return parsed.map((biz: any, i: number) => ({
       name: biz.name || query,
       address: biz.address || '',
+      countryCode: biz.countryCode || '',
       phone: biz.phone || '',
       hours: biz.hours || '',
       category: biz.category || '',

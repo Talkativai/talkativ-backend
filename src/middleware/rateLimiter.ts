@@ -27,7 +27,7 @@ export const webhookLimiter = rateLimit({
 
 export const searchLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 mins
-  max: 10, // strict limit for public unauth search to avoid scraper bots
+  max: 100, // generous — actual cost control is at the API key level
   message: { error: 'Too many search requests. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,

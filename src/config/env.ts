@@ -47,8 +47,8 @@ const envSchema = z.object({
   // HERE Places API — removed, no longer used
   // HERE_API_KEY: z.string().default(''),
 
-  // Google Places API — commented out until key is provisioned
-  // GOOGLE_PLACES_API: z.string().default(''),
+  // Google Places API — add key to .env for best search results (falls back to Claude if missing)
+  GOOGLE_PLACES_API: z.string().default(''),
 
   // Stripe price IDs
   STRIPE_STARTER_PRICE_ID: z.string().default(''),
