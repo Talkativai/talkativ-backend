@@ -44,8 +44,8 @@ const envSchema = z.object({
   // Anthropic (Claude) API
   ANTHROPIC_API_KEY: z.string().default(''),
 
-  // Google API (Places API)
-  GOOGLE_API_KEY: z.string().default(''),
+  // HERE Places API
+  HERE_API_KEY: z.string().default(''),
 
   // Stripe price IDs
   STRIPE_STARTER_PRICE_ID: z.string().default(''),
@@ -66,8 +66,6 @@ const envSchema = z.object({
   // ElevenLabs demo agent
   ELEVENLABS_DEMO_AGENT_ID: z.string().default(''),
 
-  // Foursquare Places API
-  FOURSQUARE_API_KEY: z.string().default(''),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -71,7 +71,7 @@ app.use('/webhooks', webhookRoutes);
 app.use('/api/public', webhookRoutes);
 
 // ─── Public Business Search (for onboarding, no auth needed) ─────────────────
-import * as foursquareSearch from './services/foursquare-search.service.js';
+import * as herePlaces from './services/here-places.service.js';
 import * as twilioService from './services/twilio.service.js';
 import { rateLimit } from 'express-rate-limit';
 
@@ -82,7 +82,7 @@ app.get('/api/public/search-business', searchLimiter, async (req, res) => {
     return;
   }
   try {
-    const results = await foursquareSearch.searchBusinesses(query);
+    const results = await herePlaces.searchBusinesses(query);
     res.json({ results });
   } catch (err: any) {
     console.error('Business search error:', err);
