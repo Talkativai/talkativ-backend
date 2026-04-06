@@ -1,8 +1,3 @@
-// ─── Claude-powered Business Search — DISABLED ──────────────────────────────
-// Replaced by Foursquare Places API (foursquare-search.service.ts)
-// Kept for reference only.
-
-/*
 import Anthropic from '@anthropic-ai/sdk';
 import { env } from '../config/env.js';
 
@@ -18,8 +13,11 @@ interface BusinessResult {
   hours: string;
   category: string;
   placeId: string;
+  lat?: number;
+  lng?: number;
 }
 
+// ─── Search for businesses using Claude + web_search tool ────────────────────
 export const searchBusinesses = async (query: string): Promise<BusinessResult[]> => {
   const client = getClient();
   if (!client) {
@@ -28,38 +26,42 @@ export const searchBusinesses = async (query: string): Promise<BusinessResult[]>
   }
 
   try {
-    const message = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
+    const response = await client.messages.create({
+      model: 'claude-opus-4-5-20251101',
       max_tokens: 1024,
+      tools: [{ type: 'web_search_20250305', name: 'web_search' } as any],
       messages: [
         {
           role: 'user',
-          content: `I'm searching for a business called "${query}". Please search your knowledge and return up to 5 real businesses that match this name. For each business, provide:
-- name: the full business name
-- address: the full street address including city, state/region, and country
-- phone: phone number with country code (or empty string if unknown)
-- hours: typical opening hours summary (e.g. "Mon-Fri: 9am-5pm, Sat: 10am-3pm") or empty string if unknown
-- category: the type of business (e.g. "Pizza Restaurant", "Coffee Shop", "Hair Salon")
+          content: `Search for the business "${query}" and return up to 5 real matching businesses. For each, provide:
+- name: full business name
+- address: full street address including city, state/region, and country
+- phone: phone number with country code (empty string if unknown)
+- hours: typical opening hours (e.g. "Mon-Fri: 9am-5pm") or empty string if unknown
+- category: type of business (e.g. "Pizza Restaurant", "Coffee Shop")
+- lat: latitude as number if available (null if unknown)
+- lng: longitude as number if available (null if unknown)
 
-IMPORTANT: Return ONLY a valid JSON array. No markdown, no explanation, no code fences. Just the raw JSON array.
-If you can't find any real businesses matching that name, return an empty array: []
-
-Example format:
-[{"name":"Tony's Pizzeria","address":"42 Market Street, Manchester, M1 1PW, UK","phone":"+44 161 234 5678","hours":"Mon-Sun: 11am-11pm","category":"Pizza Restaurant"}]`
-        }
+Return ONLY a valid JSON array. No markdown, no explanation, no code fences. Just the raw JSON array.
+If no businesses found, return: []`,
+        },
       ],
     });
 
-    const textBlock = message.content.find((b: any) => b.type === 'text');
+    // Extract final text block (after tool use)
+    const textBlock = [...response.content].reverse().find((b: any) => b.type === 'text');
     if (!textBlock || textBlock.type !== 'text') return [];
 
     let rawText = textBlock.text.trim();
-
     if (rawText.startsWith('```')) {
       rawText = rawText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
     }
 
-    const parsed = JSON.parse(rawText);
+    // Extract JSON array from response (Claude may include extra text)
+    const match = rawText.match(/\[[\s\S]*\]/);
+    if (!match) return [];
+
+    const parsed = JSON.parse(match[0]);
     if (!Array.isArray(parsed)) return [];
 
     return parsed.map((biz: any, i: number) => ({
@@ -69,10 +71,11 @@ Example format:
       hours: biz.hours || '',
       category: biz.category || '',
       placeId: `claude-${i}-${Date.now()}`,
+      lat: typeof biz.lat === 'number' ? biz.lat : undefined,
+      lng: typeof biz.lng === 'number' ? biz.lng : undefined,
     }));
   } catch (err: any) {
     console.error('Claude business search error:', err.message || err);
     return [];
   }
 };
-*/

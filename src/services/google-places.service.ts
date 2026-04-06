@@ -1,3 +1,8 @@
+// ─── Google Places API — COMMENTED OUT ───────────────────────────────────────
+// GOOGLE_PLACES_API key is not provisioned. Using Claude web search instead.
+// To re-enable: uncomment GOOGLE_PLACES_API in env.ts + .env, then uncomment below.
+
+/*
 import { env } from '../config/env.js';
 
 // ─── Search for a business by name using Google Places Text Search ──────────
@@ -11,12 +16,10 @@ export const searchBusiness = async (query: string): Promise<{
   lat?: number;
   lng?: number;
 } | null> => {
-  if (!env.GOOGLE_API_KEY) return null;
+  if (!env.GOOGLE_PLACES_API) return null;
 
-  // Use Google Places Text Search API (New)
-  const apiKey = env.GOOGLE_API_KEY;
-  
-  // First: Text Search to find the place
+  const apiKey = env.GOOGLE_PLACES_API;
+
   const searchRes = await fetch(
     `https://places.googleapis.com/v1/places:searchText`,
     {
@@ -42,7 +45,6 @@ export const searchBusiness = async (query: string): Promise<{
   const place = searchData.places?.[0];
   if (!place) return null;
 
-  // Format opening hours
   let hoursStr = '';
   if (place.regularOpeningHours?.weekdayDescriptions) {
     hoursStr = place.regularOpeningHours.weekdayDescriptions.join(', ');
@@ -71,7 +73,7 @@ export const searchBusinesses = async (query: string): Promise<Array<{
   category: string;
   placeId: string;
 }>> => {
-  const apiKey = env.GOOGLE_API_KEY;
+  const apiKey = env.GOOGLE_PLACES_API;
   if (!apiKey) return [];
 
   const searchRes = await fetch(
@@ -102,3 +104,4 @@ export const searchBusinesses = async (query: string): Promise<Array<{
     placeId: place.id || '',
   }));
 };
+*/

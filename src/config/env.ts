@@ -44,8 +44,11 @@ const envSchema = z.object({
   // Anthropic (Claude) API
   ANTHROPIC_API_KEY: z.string().default(''),
 
-  // HERE Places API
-  HERE_API_KEY: z.string().default(''),
+  // HERE Places API — removed, no longer used
+  // HERE_API_KEY: z.string().default(''),
+
+  // Google Places API — commented out until key is provisioned
+  // GOOGLE_PLACES_API: z.string().default(''),
 
   // Stripe price IDs
   STRIPE_STARTER_PRICE_ID: z.string().default(''),
