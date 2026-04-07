@@ -1,11 +1,28 @@
 import stripe from '../config/stripe.js';
-import prisma from '../config/db.js';
-import { PLAN_PRICES } from '../utils/constants.js';
 
 // ─── Customer ────────────────────────────────────────────────────────────────
 
 export const createCustomer = async (email: string, name: string) => {
   return stripe.customers.create({ email, name });
+};
+
+// ─── SetupIntent (collect card for trial) ────────────────────────────────────
+
+export const createSetupIntent = async (customerId: string) => {
+  return stripe.setupIntents.create({
+    customer: customerId,
+    payment_method_types: ['card'],
+  });
+};
+
+// ─── Attach payment method to customer ───────────────────────────────────────
+
+export const attachPaymentMethod = async (paymentMethodId: string, customerId: string) => {
+  await stripe.paymentMethods.attach(paymentMethodId, { customer: customerId });
+  // Set as default payment method
+  await stripe.customers.update(customerId, {
+    invoice_settings: { default_payment_method: paymentMethodId },
+  });
 };
 
 // ─── Subscription ────────────────────────────────────────────────────────────
@@ -14,12 +31,15 @@ export const createSubscription = async (params: {
   customerId: string;
   priceId: string;
   trialDays?: number;
+  defaultPaymentMethod?: string;
 }) => {
   return stripe.subscriptions.create({
     customer: params.customerId,
     items: [{ price: params.priceId }],
     trial_period_days: params.trialDays ?? 14,
-    payment_behavior: 'default_incomplete',
+    ...(params.defaultPaymentMethod
+      ? { default_payment_method: params.defaultPaymentMethod }
+      : { payment_behavior: 'default_incomplete' }),
     expand: ['latest_invoice.payment_intent'],
   });
 };
@@ -60,3 +80,4 @@ export const createPaymentIntent = async (amount: number, currency: string, meta
     metadata,
   });
 };
+

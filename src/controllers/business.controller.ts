@@ -178,8 +178,17 @@ export const setupPhone = asyncHandler(async (req: Request, res: Response) => {
   let assignedNumber: string | null = null;
 
   if (mode === 'new') {
-    const detectedCountry = twilioService.detectCountryFromAddress(biz.address || '');
-    assignedNumber = await twilioService.buyPhoneNumber(countryCode || detectedCountry);
+    // Priority: explicit countryCode from frontend > business country field > address detection
+    const resolvedCountry = countryCode
+      || (biz.country ? twilioService.detectCountryFromAddress(biz.country) : null)
+      || twilioService.detectCountryFromAddress(biz.address || '')
+      || 'GB';
+
+    assignedNumber = await twilioService.buyPhoneNumber(resolvedCountry);
+
+    if (!assignedNumber) {
+      throw ApiError.internal('Could not provision a phone number. Please try again or contact support.');
+    }
   }
 
   const config = await prisma.phoneConfig.upsert({
@@ -188,5 +197,24 @@ export const setupPhone = asyncHandler(async (req: Request, res: Response) => {
     create: { businessId: biz.id, assignedNumber: mode === 'new' ? assignedNumber : null },
   });
 
+  // If a number was provisioned and agent exists, connect them immediately
+  // so the test call step (Step6) works before onboarding is complete
+  if (assignedNumber) {
+    try {
+      const agent = await prisma.agent.findUnique({ where: { businessId: biz.id } });
+      if (agent?.elevenlabsAgentId) {
+        await twilioService.connectNumberToAgent(assignedNumber, agent.elevenlabsAgentId);
+        await prisma.agent.update({
+          where: { businessId: biz.id },
+          data: { aiPhoneNumber: assignedNumber },
+        });
+      }
+    } catch (e) {
+      console.error('Failed to connect number to agent during setup:', e);
+      // Non-fatal — number is saved, completeOnboarding will retry
+    }
+  }
+
   res.json({ assignedNumber: config.assignedNumber });
 });
+

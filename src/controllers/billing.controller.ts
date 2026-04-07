@@ -25,29 +25,82 @@ export const getInvoices = asyncHandler(async (req: Request, res: Response) => {
   res.json(invoices);
 });
 
+// ─── Create SetupIntent (collect card for trial) ─────────────────────────────
+export const createSetupIntent = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
+  const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+  if (!user) throw ApiError.notFound('User not found');
+
+  // Check if we already have a Stripe customer
+  let subscription = await prisma.subscription.findUnique({ where: { businessId } });
+  let customerId = subscription?.stripeCustomerId;
+
+  if (!customerId) {
+    const customer = await stripeService.createCustomer(user.email, `${user.firstName} ${user.lastName}`);
+    customerId = customer.id;
+
+    // Save the customer ID early (subscription record created without stripe sub yet)
+    if (subscription) {
+      await prisma.subscription.update({
+        where: { id: subscription.id },
+        data: { stripeCustomerId: customerId },
+      });
+    }
+  }
+
+  const setupIntent = await stripeService.createSetupIntent(customerId);
+
+  res.json({
+    clientSecret: setupIntent.client_secret,
+    customerId,
+  });
+});
+
+// ─── Subscribe (after card is collected via SetupIntent) ─────────────────────
 export const subscribe = asyncHandler(async (req: Request, res: Response) => {
   const businessId = req.user!.businessId;
   if (!businessId) throw ApiError.notFound('Business not found');
   const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
   if (!user) throw ApiError.notFound('User not found');
 
-  const { plan, priceId } = req.body;
+  const { plan, priceId, paymentMethodId } = req.body;
 
-  // Create Stripe customer
-  const customer = await stripeService.createCustomer(user.email, `${user.firstName} ${user.lastName}`);
+  // Get or create Stripe customer
+  let existingSub = await prisma.subscription.findUnique({ where: { businessId } });
+  let customerId = existingSub?.stripeCustomerId;
 
-  // Create subscription
+  if (!customerId) {
+    const customer = await stripeService.createCustomer(user.email, `${user.firstName} ${user.lastName}`);
+    customerId = customer.id;
+  }
+
+  // Attach payment method to customer if provided
+  if (paymentMethodId) {
+    await stripeService.attachPaymentMethod(paymentMethodId, customerId);
+  }
+
+  // Create subscription with 14-day trial
   const stripeSub = await stripeService.createSubscription({
-    customerId: customer.id,
+    customerId,
     priceId,
     trialDays: 14,
+    defaultPaymentMethod: paymentMethodId,
   });
 
   // Save to DB
-  const subscription = await prisma.subscription.create({
-    data: {
+  const subscription = await prisma.subscription.upsert({
+    where: { businessId },
+    update: {
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: stripeSub.id,
+      plan,
+      status: 'TRIALING',
+      trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+    },
+    create: {
       businessId,
-      stripeCustomerId: customer.id,
+      stripeCustomerId: customerId,
       stripeSubscriptionId: stripeSub.id,
       plan,
       status: 'TRIALING',

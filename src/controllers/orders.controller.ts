@@ -18,7 +18,13 @@ export const listOrders = asyncHandler(async (req: Request, res: Response) => {
   if (status) where.status = status;
 
   const [orders, total] = await Promise.all([
-    prisma.order.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit }),
+    prisma.order.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit,
+      include: { call: true },
+    }),
     prisma.order.count({ where }),
   ]);
 

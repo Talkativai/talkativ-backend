@@ -199,11 +199,8 @@ export const getSignedUrl = asyncHandler(async (req: Request, res: Response) => 
   res.json({ signedUrl: signed_url });
 });
 
-// ─── Rebuild system prompt (push latest menu + settings to ElevenLabs) ────────
-export const rebuildSystemPrompt = asyncHandler(async (req: Request, res: Response) => {
-  const businessId = req.user!.businessId;
-  if (!businessId) throw ApiError.notFound('Business not found');
-
+// ─── Auto-Sync Helper (push latest menu + settings to ElevenLabs) ────────────
+export const autoSyncAgent = async (businessId: string): Promise<number> => {
   const [business, agent, menuCategories, faqs, orderingPolicy, reservationPolicy] = await Promise.all([
     prisma.business.findUnique({ where: { id: businessId }, include: { agent: true } }),
     prisma.agent.findUnique({ where: { businessId } }),
@@ -218,7 +215,7 @@ export const rebuildSystemPrompt = asyncHandler(async (req: Request, res: Respon
   ]);
 
   if (!business || !agent?.elevenlabsAgentId) {
-    throw ApiError.badRequest('Agent not configured — complete onboarding first');
+    throw new Error('Agent not configured');
   }
 
   const systemPrompt = elevenlabs.buildSystemPrompt({
@@ -249,7 +246,23 @@ export const rebuildSystemPrompt = asyncHandler(async (req: Request, res: Respon
   // Save in DB so we have a record
   await prisma.agent.update({ where: { businessId }, data: { systemPrompt } });
 
-  res.json({ success: true, menuItemCount: menuCategories.reduce((n, c) => n + c.items.length, 0) });
+  return menuCategories.reduce((n, c) => n + c.items.length, 0);
+};
+
+// ─── Rebuild system prompt endpoint ──────────────────────────────────────────
+export const rebuildSystemPrompt = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
+
+  try {
+    const menuItemCount = await autoSyncAgent(businessId);
+    res.json({ success: true, menuItemCount });
+  } catch (error: any) {
+    if (error.message === 'Agent not configured') {
+      throw ApiError.badRequest('Agent not configured — complete onboarding first');
+    }
+    throw error;
+  }
 });
 
 export const previewVoice = async (req: Request, res: Response) => {

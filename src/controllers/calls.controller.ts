@@ -10,11 +10,12 @@ export const listCalls = asyncHandler(async (req: Request, res: Response) => {
   if (!businessId) throw ApiError.notFound('Business not found');
   const page = parseInt(req.query.page as string) || DEFAULT_PAGE;
   const limit = parseInt(req.query.limit as string) || DEFAULT_PAGE_SIZE;
-  const filter = req.query.filter as string; // All, Orders, Enquiries, Missed
+  const filter = req.query.filter as string; // All, Orders, Reservations, Enquiries, Missed
   const dateRange = req.query.date as string; // today, yesterday, week, month
 
   const where: any = { businessId };
   if (filter === 'Orders') where.outcomeType = 'ORDER';
+  else if (filter === 'Reservations') where.outcomeType = 'RESERVATION';
   else if (filter === 'Enquiries') where.outcomeType = 'ENQUIRY';
   else if (filter === 'Missed') where.status = 'MISSED';
 
@@ -35,7 +36,13 @@ export const listCalls = asyncHandler(async (req: Request, res: Response) => {
   }
 
   const [calls, total] = await Promise.all([
-    prisma.call.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit }),
+    prisma.call.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit,
+      include: { order: true, reservation: true },
+    }),
     prisma.call.count({ where }),
   ]);
 
@@ -45,7 +52,10 @@ export const listCalls = asyncHandler(async (req: Request, res: Response) => {
 export const getCall = asyncHandler(async (req: Request, res: Response) => {
   const businessId = req.user!.businessId;
   if (!businessId) throw ApiError.notFound('Business not found');
-  const call = await prisma.call.findFirst({ where: { id: req.params.id, businessId }, include: { order: true } });
+  const call = await prisma.call.findFirst({
+    where: { id: req.params.id, businessId },
+    include: { order: true, reservation: true },
+  });
   if (!call) throw ApiError.notFound('Call not found');
   res.json(call);
 });

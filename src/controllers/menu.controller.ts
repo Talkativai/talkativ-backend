@@ -3,6 +3,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/apiError.js';
 import prisma from '../config/db.js';
 import * as extractionService from '../services/extraction.service.js';
+import { autoSyncAgent } from './agent.controller.js';
 import type { CategorizedData } from '../services/claude.service.js';
 import type { PosSystem } from '../validators/menu.validator.js';
 
@@ -62,16 +63,21 @@ export const createCategory = asyncHandler(async (req: Request, res: Response) =
   const existing = await prisma.menuCategory.findFirst({ where: { businessId, name: { equals: name.trim(), mode: 'insensitive' } } });
   if (existing) throw ApiError.badRequest(`A category named "${name.trim()}" already exists`);
   const category = await prisma.menuCategory.create({ data: { businessId, name: name.trim() } });
+  autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
   res.status(201).json(category);
 });
 
 export const updateCategory = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = req.user!.businessId;
   const category = await prisma.menuCategory.update({ where: { id: req.params.id }, data: req.body });
+  if (businessId) autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
   res.json(category);
 });
 
 export const deleteCategory = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = req.user!.businessId;
   await prisma.menuCategory.delete({ where: { id: req.params.id } });
+  if (businessId) autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
   res.json({ message: 'Category deleted' });
 });
 
@@ -81,16 +87,22 @@ export const createItem = asyncHandler(async (req: Request, res: Response) => {
   const existing = await prisma.menuItem.findFirst({ where: { categoryId, name: { equals: name.trim(), mode: 'insensitive' } } });
   if (existing) throw ApiError.badRequest(`An item named "${name.trim()}" already exists in this category`);
   const item = await prisma.menuItem.create({ data: { categoryId, name: name.trim(), description: description?.trim() || null, price } });
+  const businessId = req.user!.businessId;
+  if (businessId) autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
   res.status(201).json(item);
 });
 
 export const updateItem = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = req.user!.businessId;
   const item = await prisma.menuItem.update({ where: { id: req.params.id }, data: req.body });
+  if (businessId) autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
   res.json(item);
 });
 
 export const deleteItem = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = req.user!.businessId;
   await prisma.menuItem.delete({ where: { id: req.params.id } });
+  if (businessId) autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
   res.json({ message: 'Item deleted' });
 });
 
@@ -154,6 +166,8 @@ export const importFromUrl = asyncHandler(async (req: Request, res: Response) =>
 
   const result = await extractionService.extractFromUrl(businessId, url);
 
+  autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
+
   res.json({
     message: `Imported ${result.menuItemsCreated} new menu items (${result.duplicatesSkipped} duplicates skipped)`,
     categorized: buildCategorizedResponse(result.categorized, result.menuItemsCreated, result.duplicatesSkipped, result.faqsCreated, result.faqsDuplicated),
@@ -176,6 +190,8 @@ export const importFromPdf = asyncHandler(async (req: Request, res: Response) =>
 
   const result = await extractionService.extractFromPdf(businessId, req.file.path, fileName);
 
+  autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
+
   res.json({
     message: `Imported ${result.menuItemsCreated} new menu items from PDF`,
     categorized: buildCategorizedResponse(result.categorized, result.menuItemsCreated, result.duplicatesSkipped, result.faqsCreated, result.faqsDuplicated),
@@ -197,6 +213,8 @@ export const importFromImage = asyncHandler(async (req: Request, res: Response) 
   const fileName = req.file.originalname || req.file.filename;
 
   const result = await extractionService.extractFromImage(businessId, req.file.path, fileName, req.file.mimetype);
+
+  autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
 
   res.json({
     message: `Imported ${result.menuItemsCreated} new menu items from image`,
@@ -230,6 +248,8 @@ export const importFromFile = asyncHandler(async (req: Request, res: Response) =
   } else {
     throw ApiError.badRequest('Unsupported file type. Please upload a PDF, DOCX, or PNG.');
   }
+
+  autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
 
   res.json({
     message: `Imported ${result.menuItemsCreated} new items from ${fileName}`,
@@ -308,6 +328,10 @@ export const importFromPos = asyncHandler(async (req: Request, res: Response) =>
 
   const hasRealSync = ['Square', 'Clover'].includes(posSystem);
 
+  if (hasRealSync) {
+    autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
+  }
+
   res.json({
     posSystem,
     synced: hasRealSync,
@@ -348,6 +372,7 @@ export const createFaq = asyncHandler(async (req: Request, res: Response) => {
   const faq = await prisma.faq.create({
     data: { businessId, question: question.trim(), answer: answer.trim(), position: count },
   });
+  autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
   res.status(201).json(faq);
 });
 
@@ -365,6 +390,7 @@ export const updateFaq = asyncHandler(async (req: Request, res: Response) => {
     where: { id },
     data: { question: question.trim(), answer: answer.trim() },
   });
+  autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
   res.json(updated);
 });
 
@@ -378,5 +404,6 @@ export const deleteFaq = asyncHandler(async (req: Request, res: Response) => {
   if (!existing) throw ApiError.notFound('FAQ not found');
 
   await prisma.faq.delete({ where: { id } });
+  autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
   res.json({ message: 'FAQ deleted' });
 });

@@ -1,5 +1,9 @@
 import { env } from '../config/env.js';
 
+// ─── Build a photo URL from a Google Places photo resource name ──────────────
+const buildPhotoUrl = (photoName: string, maxWidth = 400): string =>
+  `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=${maxWidth}&key=${env.GOOGLE_PLACES_API}`;
+
 // ─── Search with multiple results via Google Places Text Search ──────────────
 export const searchBusinesses = async (query: string): Promise<Array<{
   name: string;
@@ -11,6 +15,7 @@ export const searchBusinesses = async (query: string): Promise<Array<{
   placeId: string;
   lat?: number;
   lng?: number;
+  photos: string[];
 }>> => {
   const apiKey = env.GOOGLE_PLACES_API;
   if (!apiKey) return [];
@@ -23,7 +28,7 @@ export const searchBusinesses = async (query: string): Promise<Array<{
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': apiKey,
-          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.internationalPhoneNumber,places.primaryTypeDisplayName,places.regularOpeningHours,places.location,places.addressComponents',
+          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.internationalPhoneNumber,places.primaryTypeDisplayName,places.regularOpeningHours,places.location,places.addressComponents,places.photos',
         },
         body: JSON.stringify({
           textQuery: query,
@@ -45,6 +50,12 @@ export const searchBusinesses = async (query: string): Promise<Array<{
       );
       const countryCode = countryComponent?.shortText || '';
 
+      // Build photo URLs (up to 3)
+      const photos: string[] = (place.photos || [])
+        .slice(0, 3)
+        .map((p: any) => p.name ? buildPhotoUrl(p.name) : null)
+        .filter(Boolean);
+
       return {
         name: place.displayName?.text || '',
         address: place.formattedAddress || '',
@@ -55,6 +66,7 @@ export const searchBusinesses = async (query: string): Promise<Array<{
         placeId: place.id || '',
         lat: place.location?.latitude,
         lng: place.location?.longitude,
+        photos,
       };
     });
   } catch (err: any) {

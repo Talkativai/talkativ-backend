@@ -83,17 +83,37 @@ app.get('/api/public/search-business', searchLimiter, async (req, res) => {
     return;
   }
   try {
-    // Try Google Places first (fast, accurate, current) — requires GOOGLE_PLACES_API in .env
-    if (env.GOOGLE_PLACES_API) {
-      const googleResults = await googlePlaces.searchBusinesses(query);
-      if (googleResults.length > 0) {
-        res.json({ results: googleResults, source: 'google' });
-        return;
+    // Prioritize Claude (primary provider — no extra cost per query)
+    if (env.ANTHROPIC_API_KEY) {
+      try {
+        const claudeResults = await claudeSearch.searchBusinesses(query);
+        if (claudeResults.length > 0) {
+          // Tag each result with its source
+          const tagged = claudeResults.map(r => ({ ...r, source: 'claude' }));
+          res.json({ results: tagged, source: 'claude' });
+          return;
+        }
+      } catch (err: any) {
+        console.warn('Claude search failed, falling back:', err.message);
       }
     }
-    // Fall back to Claude web search (no API key required beyond ANTHROPIC_API_KEY)
-    const claudeResults = await claudeSearch.searchBusinesses(query);
-    res.json({ results: claudeResults, source: 'claude' });
+
+    // Fallback to Google Places if Claude returned empty or unavailable
+    if (env.GOOGLE_PLACES_API) {
+      try {
+        const googleResults = await googlePlaces.searchBusinesses(query);
+        if (googleResults.length > 0) {
+          const tagged = googleResults.map(r => ({ ...r, source: 'google' }));
+          res.json({ results: tagged, source: 'google' });
+          return;
+        }
+      } catch (err: any) {
+        console.warn('Google Places search failed:', err.message);
+      }
+    }
+
+    // Both empty or unavailable
+    res.json({ results: [] });
   } catch (err: any) {
     console.error('Business search error:', err);
     res.json({ results: [] });

@@ -16,7 +16,13 @@ export const listReservations = asyncHandler(async (req: Request, res: Response)
   if (status) where.status = status;
 
   const [reservations, total] = await Promise.all([
-    prisma.reservation.findMany({ where, orderBy: { dateTime: 'asc' }, skip: (page - 1) * limit, take: limit }),
+    prisma.reservation.findMany({
+      where,
+      orderBy: { dateTime: 'asc' },
+      skip: (page - 1) * limit,
+      take: limit,
+      include: { call: true },
+    }),
     prisma.reservation.count({ where }),
   ]);
 

@@ -348,9 +348,16 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
     totalAmount += deliveryFee;
   }
 
+  // Find the most recent LIVE call for this business to link it
+  const activeCall = await prisma.call.findFirst({
+    where: { businessId: business_id, status: 'LIVE' },
+    orderBy: { createdAt: 'desc' },
+  });
+
   const order = await prisma.order.create({
     data: {
       businessId: business_id,
+      callId: activeCall?.id || null,
       customerName: customer_name,
       customerPhone: customer_phone || null,
       customerEmail: customer_email || null,
@@ -365,6 +372,14 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
       status: 'PENDING',
     },
   });
+
+  // Update call outcome type to ORDER
+  if (activeCall) {
+    await prisma.call.update({
+      where: { id: activeCall.id },
+      data: { outcomeType: 'ORDER', outcome: `Order #${order.id.slice(0, 8)}` },
+    });
+  }
 
   // ── Push order to POS (Clover / Square) if integration is connected ──────────
   if (orderingIntegration) {
@@ -555,9 +570,16 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
     }
   }
 
+  // Find the most recent LIVE call for this business to link it
+  const activeCall = await prisma.call.findFirst({
+    where: { businessId: business_id, status: 'LIVE' },
+    orderBy: { createdAt: 'desc' },
+  });
+
   const reservation = await prisma.reservation.create({
     data: {
       businessId: business_id,
+      callId: activeCall?.id || null,
       guestName: guest_name,
       guestPhone: guest_phone || null,
       guestEmail: guest_email || null,
@@ -568,6 +590,14 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
       depositAmount: actualDeposit,
     },
   });
+
+  // Update call outcome type to RESERVATION
+  if (activeCall) {
+    await prisma.call.update({
+      where: { id: activeCall.id },
+      data: { outcomeType: 'RESERVATION', outcome: `Reservation #${reservation.id.slice(0, 8)}` },
+    });
+  }
 
   let paymentLink = null;
 

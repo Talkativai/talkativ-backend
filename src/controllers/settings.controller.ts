@@ -5,6 +5,7 @@ import prisma from '../config/db.js';
 import * as authService from '../services/auth.service.js';
 import * as emailService from '../services/email.service.js';
 import * as elevenlabs from '../services/elevenlabs.service.js';
+import { autoSyncAgent } from './agent.controller.js';
 import crypto from 'crypto';
 
 // ─── Business Settings ───────────────────────────────────────────────────────
@@ -23,6 +24,7 @@ export const updateBusinessSettings = asyncHandler(async (req: Request, res: Res
   const businessId = req.user!.businessId;
   if (!businessId) throw ApiError.notFound('Business not found');
   const updated = await prisma.business.update({ where: { id: businessId }, data: req.body });
+  autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
   res.json(updated);
 });
 
@@ -120,6 +122,7 @@ export const updateOrderingPolicy = asyncHandler(async (req: Request, res: Respo
     update: req.body,
     create: { businessId, ...req.body },
   });
+  autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
   res.json(policy);
 });
 
@@ -139,6 +142,7 @@ export const updateReservationPolicy = asyncHandler(async (req: Request, res: Re
     update: req.body,
     create: { businessId, ...req.body },
   });
+  autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
   res.json(policy);
 });
 
