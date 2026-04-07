@@ -189,7 +189,9 @@ export const setupPhone = asyncHandler(async (req: Request, res: Response) => {
     assignedNumber = await twilioService.buyPhoneNumber(resolvedCountry);
 
     if (!assignedNumber) {
-      throw ApiError.internal('Could not provision a phone number. Please try again or contact support.');
+      throw ApiError.internal(
+        'Could not provision a phone number — Twilio may not have numbers available in your region, or your Twilio credentials may be invalid. Check your TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN in your .env, then try again.'
+      );
     }
   }
 

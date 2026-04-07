@@ -27,26 +27,48 @@ export const makeDemoCall = async (
 };
 
 // ─── Buy a phone number based on country ─────────────────────────────────────
-export const buyPhoneNumber = async (countryCode: string = 'US'): Promise<string | null> => {
-  try {
-    const available = await client.availablePhoneNumbers(countryCode)
-      .local
-      .list({ voiceEnabled: true, limit: 1 });
+// Falls back to GB if the target country has no available numbers.
+export const buyPhoneNumber = async (countryCode: string = 'GB'): Promise<string | null> => {
+  const tryCountry = async (cc: string): Promise<string | null> => {
+    try {
+      const available = await client.availablePhoneNumbers(cc)
+        .local
+        .list({ voiceEnabled: true, limit: 1 });
 
-    if (!available.length) {
-      console.error(`[Twilio] No numbers available for country: ${countryCode}`);
+      if (!available.length) {
+        console.warn(`[Twilio] No local numbers available for country: ${cc}`);
+        return null;
+      }
+
+      const purchased = await client.incomingPhoneNumbers.create({
+        phoneNumber: available[0].phoneNumber,
+      });
+
+      console.log(`[Twilio] Provisioned ${purchased.phoneNumber} (${cc})`);
+      return purchased.phoneNumber;
+    } catch (e: any) {
+      console.error(`[Twilio] buyPhoneNumber(${cc}) failed:`, e.message);
       return null;
     }
+  };
 
-    const purchased = await client.incomingPhoneNumbers.create({
-      phoneNumber: available[0].phoneNumber,
-    });
+  // Try the requested country first
+  const primary = await tryCountry(countryCode);
+  if (primary) return primary;
 
-    return purchased.phoneNumber;
-  } catch (e: any) {
-    console.error('[Twilio] Buy number failed:', e.message);
-    return null;
+  // Fallback chain: GB → US
+  if (countryCode !== 'GB') {
+    console.warn(`[Twilio] Falling back to GB number (${countryCode} unavailable)`);
+    const gb = await tryCountry('GB');
+    if (gb) return gb;
   }
+
+  if (countryCode !== 'US') {
+    console.warn('[Twilio] Falling back to US number');
+    return tryCountry('US');
+  }
+
+  return null;
 };
 
 // ─── Connect number to ElevenLabs agent ──────────────────────────────────────

@@ -80,10 +80,20 @@ export const subscribe = asyncHandler(async (req: Request, res: Response) => {
     return res.status(201).json(subscription);
   }
 
+  const { priceId, paymentMethodId } = req.body;
+
+  // If no priceId configured yet, skip Stripe subscription and just record the trial
+  if (!priceId) {
+    const subscription = await prisma.subscription.upsert({
+      where: { businessId },
+      update: { plan, status: 'TRIALING', trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) },
+      create: { businessId, plan, status: 'TRIALING', trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) },
+    });
+    return res.status(201).json(subscription);
+  }
+
   const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
   if (!user) throw ApiError.notFound('User not found');
-
-  const { priceId, paymentMethodId } = req.body;
 
   // Get or create Stripe customer
   let existingSub = await prisma.subscription.findUnique({ where: { businessId } });
