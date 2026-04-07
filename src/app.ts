@@ -73,6 +73,7 @@ app.use('/api/public', webhookRoutes);
 // ─── Public Business Search (for onboarding, no auth needed) ─────────────────
 import * as claudeSearch from './services/claude-search.service.js';
 import * as googlePlaces from './services/google-places.service.js';
+import * as geoapify from './services/geoapify.service.js';
 import * as twilioService from './services/twilio.service.js';
 import { rateLimit } from 'express-rate-limit';
 
@@ -83,22 +84,7 @@ app.get('/api/public/search-business', searchLimiter, async (req, res) => {
     return;
   }
   try {
-    // Prioritize Claude (primary provider — no extra cost per query)
-    if (env.ANTHROPIC_API_KEY) {
-      try {
-        const claudeResults = await claudeSearch.searchBusinesses(query);
-        if (claudeResults.length > 0) {
-          // Tag each result with its source
-          const tagged = claudeResults.map(r => ({ ...r, source: 'claude' }));
-          res.json({ results: tagged, source: 'claude' });
-          return;
-        }
-      } catch (err: any) {
-        console.warn('Claude search failed, falling back:', err.message);
-      }
-    }
-
-    // Fallback to Google Places if Claude returned empty or unavailable
+    // 1. Google Places API — primary (fast, accurate, real photos)
     if (env.GOOGLE_PLACES_API) {
       try {
         const googleResults = await googlePlaces.searchBusinesses(query);
@@ -108,11 +94,24 @@ app.get('/api/public/search-business', searchLimiter, async (req, res) => {
           return;
         }
       } catch (err: any) {
-        console.warn('Google Places search failed:', err.message);
+        console.warn('[search] Google Places failed, trying Outscraper:', err.message);
       }
     }
 
-    // Both empty or unavailable
+    // 2. Geoapify — fallback (free tier: 3000 req/day)
+    if (env.GEOAPIFY_API_KEY) {
+      try {
+        const geoapifyResults = await geoapify.searchBusinesses(query);
+        if (geoapifyResults.length > 0) {
+          const tagged = geoapifyResults.map(r => ({ ...r, source: 'geoapify' }));
+          res.json({ results: tagged, source: 'geoapify' });
+          return;
+        }
+      } catch (err: any) {
+        console.warn('[search] Geoapify failed:', err.message);
+      }
+    }
+
     res.json({ results: [] });
   } catch (err: any) {
     console.error('Business search error:', err);

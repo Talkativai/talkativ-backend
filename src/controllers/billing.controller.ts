@@ -29,6 +29,12 @@ export const getInvoices = asyncHandler(async (req: Request, res: Response) => {
 export const createSetupIntent = asyncHandler(async (req: Request, res: Response) => {
   const businessId = req.user!.businessId;
   if (!businessId) throw ApiError.notFound('Business not found');
+
+  // Dev bypass — no Stripe key configured, skip card collection entirely
+  if (!env.STRIPE_SECRET_KEY) {
+    return res.json({ clientSecret: null, devMode: true });
+  }
+
   const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
   if (!user) throw ApiError.notFound('User not found');
 
@@ -61,10 +67,23 @@ export const createSetupIntent = asyncHandler(async (req: Request, res: Response
 export const subscribe = asyncHandler(async (req: Request, res: Response) => {
   const businessId = req.user!.businessId;
   if (!businessId) throw ApiError.notFound('Business not found');
+
+  const { plan } = req.body;
+
+  // Dev bypass — no Stripe key, just create a trial subscription record locally
+  if (!env.STRIPE_SECRET_KEY) {
+    const subscription = await prisma.subscription.upsert({
+      where: { businessId },
+      update: { plan, status: 'TRIALING', trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) },
+      create: { businessId, plan, status: 'TRIALING', trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) },
+    });
+    return res.status(201).json(subscription);
+  }
+
   const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
   if (!user) throw ApiError.notFound('User not found');
 
-  const { plan, priceId, paymentMethodId } = req.body;
+  const { priceId, paymentMethodId } = req.body;
 
   // Get or create Stripe customer
   let existingSub = await prisma.subscription.findUnique({ where: { businessId } });

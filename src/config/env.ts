@@ -47,8 +47,11 @@ const envSchema = z.object({
   // HERE Places API — removed, no longer used
   // HERE_API_KEY: z.string().default(''),
 
-  // Google Places API — add key to .env for best search results (falls back to Claude if missing)
+  // Google Places API — primary business search provider
   GOOGLE_PLACES_API: z.string().default(''),
+
+  // Geoapify — fallback business search (free tier: 3000 req/day)
+  GEOAPIFY_API_KEY: z.string().default(''),
 
   // Stripe price IDs
   STRIPE_STARTER_PRICE_ID: z.string().default(''),

@@ -20,6 +20,10 @@ interface BusinessResult {
   website?: string;
 }
 
+// ─── In-memory cache: avoid hitting Claude for the same query within 5 minutes ─
+const cache = new Map<string, { results: BusinessResult[]; ts: number }>();
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
 // ─── Search for businesses using Claude + web_search tool ────────────────────
 export const searchBusinesses = async (query: string): Promise<BusinessResult[]> => {
   const client = getClient();
@@ -28,33 +32,34 @@ export const searchBusinesses = async (query: string): Promise<BusinessResult[]>
     return [];
   }
 
-  // Abort after 15 seconds (web_search needs time, but we want a reasonable cap)
+  // Return cached result if fresh
+  const cacheKey = query.toLowerCase().trim();
+  const cached = cache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+    return cached.results;
+  }
+
+  // Abort after 8 seconds — balances quality vs. speed
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
+  const timeout = setTimeout(() => controller.abort(), 8000);
 
   try {
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 2048,
+      model: 'claude-haiku-4-5-20251001',   // Haiku is ~3× faster than Sonnet for this task
+      max_tokens: 1024,
       tools: [{ type: 'web_search_20250305', name: 'web_search' } as any],
       messages: [
         {
           role: 'user',
-          content: `Use web search to find real businesses matching: "${query}". Search GLOBALLY — the business could be in ANY country (UK, US, Nigeria, India, etc.). Return up to 5 results.
+          content: `Search for: "${query}". Find up to 5 real matching businesses GLOBALLY (any country).
 
-For each result provide these exact fields:
-- name: full business name
-- address: full street address including city, state/region, country
-- countryCode: 2-letter ISO country code (e.g. "GB", "US", "NG", "IN") — derive from address
-- phone: phone number with country code prefix (e.g. "+44 20 1234 5678"), empty string if not found
-- hours: opening hours summary (e.g. "Mon-Fri: 9am-5pm, Sat: 10am-4pm, Sun: Closed"), empty string if unknown. Try hard to find this from Google Maps, Yelp, or the business website.
-- category: business type (e.g. "Pizza Restaurant", "Coffee Shop", "Nigerian Restaurant")
-- lat: latitude as number or null
-- lng: longitude as number or null
-- website: business website URL if found, empty string if not
-- photos: array of up to 3 direct image URLs of the business (storefront photos, interior, food photos). Look for images on their website, Google Business listing, Yelp, TripAdvisor, or social media. Only include URLs that end in image extensions (.jpg, .png, .webp) or are from known image CDNs. Empty array [] if no images found.
+Return ONLY a JSON array, no markdown, no explanation:
+[{"name":"","address":"","countryCode":"","phone":"","hours":"","category":"","lat":null,"lng":null,"website":"","photos":[]}]
 
-IMPORTANT: Return ONLY a raw JSON array — no markdown, no backticks, no explanation.
+- countryCode: 2-letter ISO (GB, US, NG, IN, etc.)
+- phone: with country code e.g. "+44 20 1234 5678"
+- hours: e.g. "Mon-Fri 9am-5pm, Sat 10am-4pm, Sun Closed" — check Google Maps or website
+- photos: up to 2 direct image URLs (.jpg/.png/.webp) from their site/Yelp/TripAdvisor
 If nothing found: []`,
         },
       ],
@@ -71,14 +76,18 @@ If nothing found: []`,
       rawText = rawText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
     }
 
-    // Extract JSON array from response (Claude may include extra text)
     const match = rawText.match(/\[[\s\S]*\]/);
     if (!match) return [];
 
     const parsed = JSON.parse(match[0]);
     if (!Array.isArray(parsed)) return [];
 
-    return parsed.map((biz: any, i: number) => ({
+    // Log token usage
+    if (response.usage) {
+      console.log(`[claude-search] in:${response.usage.input_tokens} out:${response.usage.output_tokens} total:${response.usage.input_tokens + response.usage.output_tokens}`);
+    }
+
+    const results: BusinessResult[] = parsed.map((biz: any, i: number) => ({
       name: biz.name || query,
       address: biz.address || '',
       countryCode: biz.countryCode || '',
@@ -89,12 +98,18 @@ If nothing found: []`,
       lat: typeof biz.lat === 'number' ? biz.lat : undefined,
       lng: typeof biz.lng === 'number' ? biz.lng : undefined,
       website: biz.website || '',
-      photos: Array.isArray(biz.photos) ? biz.photos.filter((url: any) => typeof url === 'string' && url.startsWith('http')) : [],
+      photos: Array.isArray(biz.photos)
+        ? biz.photos.filter((url: any) => typeof url === 'string' && url.startsWith('http')).slice(0, 2)
+        : [],
     }));
+
+    // Cache the result
+    cache.set(cacheKey, { results, ts: Date.now() });
+    return results;
   } catch (err: any) {
     clearTimeout(timeout);
     if (err.name === 'AbortError') {
-      console.warn('Claude business search timed out (15s limit)');
+      console.warn('Claude business search timed out (8s limit)');
       return [];
     }
     console.error('Claude business search error:', err.message || err);

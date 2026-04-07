@@ -11,10 +11,9 @@ export const extractFromUrl = async (
   businessId: string,
   url: string
 ): Promise<{ categorized: CategorizedData } & SaveResult> => {
-  // Scrape and get raw text
+  // Scrape raw text (no AI needed for this step)
   const rawText = await claudeService.scrapeAndAnalyzeUrl(url);
 
-  // AI categorization
   const categorized = await claudeService.categorizeExtractedData(rawText, 'url');
 
   // Save extraction record

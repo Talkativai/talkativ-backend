@@ -178,10 +178,12 @@ export const setupPhone = asyncHandler(async (req: Request, res: Response) => {
   let assignedNumber: string | null = null;
 
   if (mode === 'new') {
-    // Priority: explicit countryCode from frontend > business country field > address detection
-    const resolvedCountry = countryCode
-      || (biz.country ? twilioService.detectCountryFromAddress(biz.country) : null)
-      || twilioService.detectCountryFromAddress(biz.address || '')
+    // Resolve to a 2-letter ISO code for Twilio.
+    // biz.country is stored as a full name ("Nigeria", "United Kingdom") not an ISO code,
+    // so we always run it through detectCountryFromAddress which does the mapping.
+    const rawHint = countryCode || biz.country || biz.address || '';
+    const resolvedCountry = (rawHint.length <= 3 ? rawHint.toUpperCase() : null)
+      || twilioService.detectCountryFromAddress(rawHint)
       || 'GB';
 
     assignedNumber = await twilioService.buyPhoneNumber(resolvedCountry);
@@ -197,21 +199,55 @@ export const setupPhone = asyncHandler(async (req: Request, res: Response) => {
     create: { businessId: biz.id, assignedNumber: mode === 'new' ? assignedNumber : null },
   });
 
-  // If a number was provisioned and agent exists, connect them immediately
-  // so the test call step (Step6) works before onboarding is complete
+  // If a number was provisioned, ensure an ElevenLabs agent exists and connect them.
+  // This guarantees the Step 6 test call works before billing is complete.
   if (assignedNumber) {
     try {
       const agent = await prisma.agent.findUnique({ where: { businessId: biz.id } });
-      if (agent?.elevenlabsAgentId) {
-        await twilioService.connectNumberToAgent(assignedNumber, agent.elevenlabsAgentId);
-        await prisma.agent.update({
+      let elevenlabsAgentId = agent?.elevenlabsAgentId;
+
+      // No ElevenLabs agent yet (Step 4 save may have failed) — create a basic one now
+      if (!elevenlabsAgentId) {
+        const agentName = agent?.name || 'Aria';
+        const voiceId   = agent?.voiceId || '21m00Tcm4TlvDq8ikWAM';
+        const greeting  = agent?.openingGreeting
+          || `Thank you for calling ${biz.name}, this is ${agentName}. How can I help you today?`;
+
+        const systemPrompt = elevenlabs.buildSystemPrompt({
+          name: biz.name,
+          type: biz.type || 'restaurant',
+          address: biz.address || '',
+          openingHours: biz.openingHours,
+          agentName,
+          greeting,
+        });
+
+        const elAgent = await elevenlabs.createAgent({
+          name: agentName,
+          systemPrompt,
+          firstMessage: greeting,
+          voiceId,
+          businessId: biz.id,
+        });
+
+        elevenlabsAgentId = elAgent.agent_id;
+
+        await prisma.agent.upsert({
           where: { businessId: biz.id },
-          data: { aiPhoneNumber: assignedNumber },
+          update: { elevenlabsAgentId, systemPrompt },
+          create: { businessId: biz.id, name: agentName, voiceId, elevenlabsAgentId, systemPrompt },
         });
       }
+
+      // Connect Twilio number → ElevenLabs agent
+      await twilioService.connectNumberToAgent(assignedNumber, elevenlabsAgentId);
+      await prisma.agent.update({
+        where: { businessId: biz.id },
+        data: { aiPhoneNumber: assignedNumber },
+      });
     } catch (e) {
       console.error('Failed to connect number to agent during setup:', e);
-      // Non-fatal — number is saved, completeOnboarding will retry
+      // Non-fatal — number is saved, completeOnboarding will retry connection
     }
   }
 
