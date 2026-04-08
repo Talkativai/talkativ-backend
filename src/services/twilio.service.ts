@@ -6,15 +6,21 @@ const client = twilio(env.TWILIO_ACCOUNT_SID, env.TWILIO_AUTH_TOKEN);
 // ─── Make outbound demo call ──────────────────────────────────────────────────
 export const makeDemoCall = async (
   toNumber: string,
-  agentId?: string
+  agentId?: string,
+  fromNumber?: string
 ): Promise<{ success: boolean; callSid?: string; message?: string }> => {
   try {
-    // Use provided agentId or fall back to demo agent
     const id = agentId || env.ELEVENLABS_DEMO_AGENT_ID;
+
+    // Use explicit from → env TWILIO_PHONE_NUMBER → first purchased number
+    const from = fromNumber || env.TWILIO_PHONE_NUMBER || await getExistingNumber();
+    if (!from) {
+      return { success: false, message: 'No outbound number available on this Twilio account' };
+    }
 
     const call = await client.calls.create({
       to: toNumber,
-      from: env.TWILIO_PHONE_NUMBER,
+      from,
       url: `https://api.elevenlabs.io/v1/convai/twilio/inbound_call?agent_id=${id}`,
       method: 'POST',
     });
@@ -26,8 +32,24 @@ export const makeDemoCall = async (
   }
 };
 
+// ─── Get the first already-purchased number on this Twilio account ────────────
+const getExistingNumber = async (): Promise<string | null> => {
+  try {
+    const numbers = await client.incomingPhoneNumbers.list({ limit: 1 });
+    if (numbers.length) {
+      console.log(`[Twilio] Reusing existing number: ${numbers[0].phoneNumber}`);
+      return numbers[0].phoneNumber;
+    }
+    return null;
+  } catch (e: any) {
+    console.error('[Twilio] getExistingNumber failed:', e.message);
+    return null;
+  }
+};
+
 // ─── Buy a phone number based on country ─────────────────────────────────────
-// Falls back to GB if the target country has no available numbers.
+// On Twilio trial accounts (1-number limit), falls back to the existing number.
+// On paid accounts, tries the target country then GB then US.
 export const buyPhoneNumber = async (countryCode: string = 'GB'): Promise<string | null> => {
   const tryCountry = async (cc: string): Promise<string | null> => {
     try {
@@ -36,7 +58,7 @@ export const buyPhoneNumber = async (countryCode: string = 'GB'): Promise<string
         .list({ voiceEnabled: true, limit: 1 });
 
       if (!available.length) {
-        console.warn(`[Twilio] No local numbers available for country: ${cc}`);
+        console.warn(`[Twilio] No local numbers available for: ${cc}`);
         return null;
       }
 
@@ -47,6 +69,11 @@ export const buyPhoneNumber = async (countryCode: string = 'GB'): Promise<string
       console.log(`[Twilio] Provisioned ${purchased.phoneNumber} (${cc})`);
       return purchased.phoneNumber;
     } catch (e: any) {
+      // Trial accounts are limited to one number — reuse the existing one
+      if (e.code === 21404) {
+        console.warn('[Twilio] Trial account: reusing existing provisioned number');
+        return getExistingNumber();
+      }
       console.error(`[Twilio] buyPhoneNumber(${cc}) failed:`, e.message);
       return null;
     }
@@ -56,15 +83,15 @@ export const buyPhoneNumber = async (countryCode: string = 'GB'): Promise<string
   const primary = await tryCountry(countryCode);
   if (primary) return primary;
 
-  // Fallback chain: GB → US
+  // Fallback: GB → US
   if (countryCode !== 'GB') {
-    console.warn(`[Twilio] Falling back to GB number (${countryCode} unavailable)`);
+    console.warn(`[Twilio] Falling back to GB (${countryCode} unavailable)`);
     const gb = await tryCountry('GB');
     if (gb) return gb;
   }
 
   if (countryCode !== 'US') {
-    console.warn('[Twilio] Falling back to US number');
+    console.warn('[Twilio] Falling back to US');
     return tryCountry('US');
   }
 

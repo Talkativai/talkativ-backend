@@ -82,8 +82,8 @@ export const subscribe = asyncHandler(async (req: Request, res: Response) => {
 
   const { priceId, paymentMethodId } = req.body;
 
-  // If no priceId configured yet, skip Stripe subscription and just record the trial
-  if (!priceId) {
+  // If no priceId, or it's a product ID (prod_) instead of a price ID (price_), skip Stripe
+  if (!priceId || !priceId.startsWith('price_')) {
     const subscription = await prisma.subscription.upsert({
       where: { businessId },
       update: { plan, status: 'TRIALING', trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) },
