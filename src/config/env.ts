@@ -53,6 +53,9 @@ const envSchema = z.object({
   // Geoapify — fallback business search (free tier: 3000 req/day)
   GEOAPIFY_API_KEY: z.string().default(''),
 
+  // Support ticket destination email
+  SUPPORT_EMAIL: z.string().default('support@talkativ.com'),
+
   // Stripe price IDs
   STRIPE_STARTER_PRICE_ID: z.string().default(''),
   STRIPE_GROWTH_PRICE_ID: z.string().default(''),

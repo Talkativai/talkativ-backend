@@ -332,6 +332,41 @@ export const sendBusinessNewOrderAlert = async (to: string, businessName: string
   });
 };
 
+export const sendSupportTicket = async (params: {
+  category: string;
+  subject: string;
+  message: string;
+  fromEmail: string;
+  fromPhone: string;
+  businessName: string;
+}) => {
+  return resend.emails.send({
+    from,
+    to: [env.SUPPORT_EMAIL],
+    subject: `[Support Ticket – ${params.category}] ${params.subject}`,
+    html: `
+      <div style="font-family:'Segoe UI',sans-serif;max-width:580px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:16px;overflow:hidden;">
+        <div style="background:linear-gradient(135deg,#7035f5,#4b1ab5);padding:28px 32px;">
+          <h1 style="color:white;margin:0;font-size:20px;font-weight:800;">New Support Ticket</h1>
+          <p style="color:rgba(255,255,255,.75);margin:6px 0 0;font-size:13px;">Category: <strong style="color:white;">${params.category}</strong></p>
+        </div>
+        <div style="padding:28px 32px;">
+          <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
+            <tr><td style="padding:8px 0;font-size:13px;color:#6b5e8a;width:120px;">Business</td><td style="padding:8px 0;font-size:14px;font-weight:600;color:#130d2e;">${params.businessName}</td></tr>
+            <tr style="border-top:1px solid #f0ebff;"><td style="padding:8px 0;font-size:13px;color:#6b5e8a;">Email</td><td style="padding:8px 0;font-size:14px;color:#130d2e;"><a href="mailto:${params.fromEmail}" style="color:#7035f5;text-decoration:none;">${params.fromEmail}</a></td></tr>
+            <tr style="border-top:1px solid #f0ebff;"><td style="padding:8px 0;font-size:13px;color:#6b5e8a;">Phone</td><td style="padding:8px 0;font-size:14px;color:#130d2e;">${params.fromPhone || '—'}</td></tr>
+            <tr style="border-top:1px solid #f0ebff;"><td style="padding:8px 0;font-size:13px;color:#6b5e8a;">Subject</td><td style="padding:8px 0;font-size:14px;font-weight:600;color:#130d2e;">${params.subject}</td></tr>
+          </table>
+          <div style="background:#f8f6ff;border:1.5px solid #ece5ff;border-radius:12px;padding:20px 24px;">
+            <div style="font-size:12px;font-weight:700;color:#9e92ba;letter-spacing:.5px;text-transform:uppercase;margin-bottom:10px;">Message</div>
+            <p style="font-size:14px;color:#2d2150;line-height:1.7;margin:0;white-space:pre-wrap;">${params.message}</p>
+          </div>
+        </div>
+      </div>
+    `,
+  });
+};
+
 export const sendBusinessNewReservationAlert = async (to: string, businessName: string, reservationDetails: {
   id: string;
   guestName: string;

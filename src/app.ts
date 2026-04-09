@@ -24,6 +24,7 @@ import settingsRoutes from './routes/settings.routes.js';
 import uploadRoutes from './routes/upload.routes.js';
 import webhookRoutes from './routes/webhook.routes.js';
 import voicesRoutes from './routes/agent.routes.js';
+import supportRoutes from './routes/support.routes.js';
 import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
@@ -65,6 +66,7 @@ app.use('/api/integrations', apiLimiter, integrationsRoutes);
 app.use('/api/billing', apiLimiter, billingRoutes);
 app.use('/api/settings', apiLimiter, settingsRoutes);
 app.use('/api/upload', apiLimiter, uploadRoutes);
+app.use('/api/support', apiLimiter, supportRoutes);
 
 // ─── Webhook Routes (public — no API limiter, own limiter) ───────────────────
 app.use('/webhooks', webhookRoutes);
