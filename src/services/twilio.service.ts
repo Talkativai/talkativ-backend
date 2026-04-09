@@ -47,29 +47,78 @@ const getExistingNumber = async (): Promise<string | null> => {
   }
 };
 
+// ─── Look up the first approved bundle SID for a country ─────────────────────
+const getApprovedBundleSid = async (): Promise<string | null> => {
+  try {
+    const res = await fetch(
+      'https://numbers.twilio.com/v2/RegulatoryCompliance/Bundles?Status=twilio-approved&PageSize=20',
+      {
+        headers: {
+          Authorization: 'Basic ' + Buffer.from(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`).toString('base64'),
+        },
+      }
+    );
+    const data = await res.json() as any;
+    return data.results?.[0]?.sid ?? null;
+  } catch {
+    return null;
+  }
+};
+
 // ─── Buy a phone number based on country ─────────────────────────────────────
-// On Twilio trial accounts (1-number limit), falls back to the existing number.
-// On paid accounts, tries the target country then GB then US.
+// Automatically passes AddressSid + BundleSid for countries that require them (e.g. GB).
+// On trial accounts falls back to the existing number. On paid accounts: target → GB → US.
 export const buyPhoneNumber = async (countryCode: string = 'GB'): Promise<string | null> => {
+  const cc = countryCode.toUpperCase();
+
   const tryCountry = async (cc: string): Promise<string | null> => {
     try {
       const available = await client.availablePhoneNumbers(cc)
         .local
-        .list({ voiceEnabled: true, limit: 1 });
+        .list({ voiceEnabled: true, limit: 5 });
 
       if (!available.length) {
         console.warn(`[Twilio] No local numbers available for: ${cc}`);
         return null;
       }
 
-      const purchased = await client.incomingPhoneNumbers.create({
-        phoneNumber: available[0].phoneNumber,
-      });
+      for (const num of available) {
+        try {
+          const params: Record<string, string> = { phoneNumber: num.phoneNumber };
 
-      console.log(`[Twilio] Provisioned ${purchased.phoneNumber} (${cc})`);
-      return purchased.phoneNumber;
+          // If this number requires a local address, attach one
+          if (num.addressRequirements && num.addressRequirements !== 'none') {
+            const addresses = await client.addresses.list({ isoCountry: cc, limit: 1 });
+            if (addresses.length) params.addressSid = addresses[0].sid;
+          }
+
+          const purchased = await client.incomingPhoneNumbers.create(params as any);
+          console.log(`[Twilio] Provisioned ${purchased.phoneNumber} (${cc})`);
+          return purchased.phoneNumber;
+        } catch (innerErr: any) {
+          // Bundle required — look up the first approved bundle and retry
+          if (innerErr.code === 21649) {
+            try {
+              const bundleSid = await getApprovedBundleSid();
+              if (!bundleSid) { console.warn('[Twilio] No approved bundle found'); continue; }
+
+              const params2: Record<string, string> = { phoneNumber: num.phoneNumber, bundleSid };
+              const addresses = await client.addresses.list({ isoCountry: cc, limit: 1 });
+              if (addresses.length) params2.addressSid = addresses[0].sid;
+
+              const purchased = await client.incomingPhoneNumbers.create(params2 as any);
+              console.log(`[Twilio] Provisioned ${purchased.phoneNumber} (${cc}) with bundle`);
+              return purchased.phoneNumber;
+            } catch (bundleErr: any) {
+              console.warn(`[Twilio] Bundle buy failed for ${num.phoneNumber}:`, bundleErr.message);
+            }
+          } else {
+            console.warn(`[Twilio] Buy failed for ${num.phoneNumber}:`, innerErr.message);
+          }
+        }
+      }
+      return null;
     } catch (e: any) {
-      // Trial accounts are limited to one number — reuse the existing one
       if (e.code === 21404) {
         console.warn('[Twilio] Trial account: reusing existing provisioned number');
         return getExistingNumber();
@@ -79,23 +128,7 @@ export const buyPhoneNumber = async (countryCode: string = 'GB'): Promise<string
     }
   };
 
-  // Try the requested country first
-  const primary = await tryCountry(countryCode);
-  if (primary) return primary;
-
-  // Fallback: GB → US
-  if (countryCode !== 'GB') {
-    console.warn(`[Twilio] Falling back to GB (${countryCode} unavailable)`);
-    const gb = await tryCountry('GB');
-    if (gb) return gb;
-  }
-
-  if (countryCode !== 'US') {
-    console.warn('[Twilio] Falling back to US');
-    return tryCountry('US');
-  }
-
-  return null;
+  return tryCountry(cc);
 };
 
 // ─── Connect number to ElevenLabs agent ──────────────────────────────────────

@@ -73,7 +73,6 @@ app.use('/api/public', webhookRoutes);
 // ─── Public Business Search (for onboarding, no auth needed) ─────────────────
 import * as claudeSearch from './services/claude-search.service.js';
 import * as googlePlaces from './services/google-places.service.js';
-import * as geoapify from './services/geoapify.service.js';
 import * as twilioService from './services/twilio.service.js';
 import { rateLimit } from 'express-rate-limit';
 
@@ -95,20 +94,6 @@ app.get('/api/public/search-business', searchLimiter, async (req, res) => {
         }
       } catch (err: any) {
         console.warn('[search] Google Places failed, trying Outscraper:', err.message);
-      }
-    }
-
-    // 2. Geoapify — fallback (free tier: 3000 req/day)
-    if (env.GEOAPIFY_API_KEY) {
-      try {
-        const geoapifyResults = await geoapify.searchBusinesses(query);
-        if (geoapifyResults.length > 0) {
-          const tagged = geoapifyResults.map(r => ({ ...r, source: 'geoapify' }));
-          res.json({ results: tagged, source: 'geoapify' });
-          return;
-        }
-      } catch (err: any) {
-        console.warn('[search] Geoapify failed:', err.message);
       }
     }
 

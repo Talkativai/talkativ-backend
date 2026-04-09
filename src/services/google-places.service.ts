@@ -4,6 +4,35 @@ import { env } from '../config/env.js';
 const buildPhotoUrl = (photoName: string, maxWidth = 400): string =>
   `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=${maxWidth}&key=${env.GOOGLE_PLACES_API}`;
 
+// ─── Day index to key mapping (Google: 0=Sun, 1=Mon, ..., 6=Sat) ─────────────
+const DAY_MAP: Record<number, string> = { 0: 'sun', 1: 'mon', 2: 'tue', 3: 'wed', 4: 'thu', 5: 'fri', 6: 'sat' };
+
+// ─── Parse Google's regularOpeningHours into our structured format ────────────
+function parseOpeningHoursStructured(regularOpeningHours: any): Record<string, string> {
+  const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+  const result: Record<string, string> = { is24h: 'false' };
+  days.forEach(d => { result[d] = 'closed'; });
+
+  if (!regularOpeningHours?.periods?.length) return result;
+
+  // 24/7 detection: single period with no close time
+  if (regularOpeningHours.periods.length === 1 && !regularOpeningHours.periods[0].close) {
+    return { is24h: 'true' };
+  }
+
+  for (const period of regularOpeningHours.periods) {
+    const dayKey = DAY_MAP[period.open?.day];
+    if (!dayKey) continue;
+    const openH = String(period.open.hour ?? 0).padStart(2, '0');
+    const openM = String(period.open.minute ?? 0).padStart(2, '0');
+    const closeH = String(period.close?.hour ?? 23).padStart(2, '0');
+    const closeM = String(period.close?.minute ?? 59).padStart(2, '0');
+    result[dayKey] = `${openH}:${openM}-${closeH}:${closeM}`;
+  }
+
+  return result;
+}
+
 // ─── Search with multiple results via Google Places Text Search ──────────────
 export const searchBusinesses = async (query: string): Promise<Array<{
   name: string;
@@ -11,6 +40,7 @@ export const searchBusinesses = async (query: string): Promise<Array<{
   countryCode: string;
   phone: string;
   hours: string;
+  openingHoursStructured: Record<string, string>;
   category: string;
   placeId: string;
   lat?: number;
@@ -62,6 +92,7 @@ export const searchBusinesses = async (query: string): Promise<Array<{
         countryCode,
         phone: place.internationalPhoneNumber || '',
         hours: place.regularOpeningHours?.weekdayDescriptions?.join(', ') || '',
+        openingHoursStructured: parseOpeningHoursStructured(place.regularOpeningHours),
         category: place.primaryTypeDisplayName?.text || '',
         placeId: place.id || '',
         lat: place.location?.latitude,
