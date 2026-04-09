@@ -47,92 +47,56 @@ const getExistingNumber = async (): Promise<string | null> => {
   }
 };
 
-// ─── Look up the first approved bundle SID for a country ─────────────────────
-const getApprovedBundleSid = async (): Promise<string | null> => {
-  try {
-    const res = await fetch(
-      'https://numbers.twilio.com/v2/RegulatoryCompliance/Bundles?Status=twilio-approved&PageSize=20',
-      {
-        headers: {
-          Authorization: 'Basic ' + Buffer.from(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`).toString('base64'),
-        },
-      }
-    );
-    const data = await res.json() as any;
-    return data.results?.[0]?.sid ?? null;
-  } catch {
-    return null;
-  }
-};
-
 // ─── Buy a phone number based on country ─────────────────────────────────────
-// Automatically passes AddressSid + BundleSid for countries that require them (e.g. GB).
-// On trial accounts falls back to the existing number. On paid accounts: target → GB → US.
+// Uses TWILIO_BUNDLE_SID + TWILIO_ADDRESS_SID from env for countries that require them (e.g. GB).
+// Falls back to reusing an existing number on the account if purchase fails.
 export const buyPhoneNumber = async (countryCode: string = 'GB'): Promise<string | null> => {
   const cc = countryCode.toUpperCase();
 
-  const tryCountry = async (cc: string): Promise<string | null> => {
-    try {
-      const available = await client.availablePhoneNumbers(cc)
-        .local
-        .list({ voiceEnabled: true, limit: 5 });
+  try {
+    const available = await client.availablePhoneNumbers(cc)
+      .local
+      .list({ voiceEnabled: true, limit: 5 });
 
-      if (!available.length) {
-        console.warn(`[Twilio] No local numbers available for: ${cc}`);
-        return null;
-      }
-
+    if (!available.length) {
+      console.warn(`[Twilio] No local numbers available for: ${cc}`);
+    } else {
       for (const num of available) {
         try {
           const params: Record<string, string> = { phoneNumber: num.phoneNumber };
 
-          // If this number requires a local address, attach one
+          // Attach address if required by this number
           if (num.addressRequirements && num.addressRequirements !== 'none') {
-            const addresses = await client.addresses.list({ isoCountry: cc, limit: 1 });
-            if (addresses.length) params.addressSid = addresses[0].sid;
+            if (env.TWILIO_ADDRESS_SID) {
+              params.addressSid = env.TWILIO_ADDRESS_SID;
+            } else {
+              const addresses = await client.addresses.list({ isoCountry: cc, limit: 1 });
+              if (addresses.length) params.addressSid = addresses[0].sid;
+            }
+          }
+
+          // Attach regulatory bundle if configured (required for GB, etc.)
+          if (env.TWILIO_BUNDLE_SID) {
+            params.bundleSid = env.TWILIO_BUNDLE_SID;
           }
 
           const purchased = await client.incomingPhoneNumbers.create(params as any);
           console.log(`[Twilio] Provisioned ${purchased.phoneNumber} (${cc})`);
           return purchased.phoneNumber;
         } catch (innerErr: any) {
-          // Bundle required — look up the first approved bundle and retry
-          if (innerErr.code === 21649) {
-            try {
-              const bundleSid = await getApprovedBundleSid();
-              if (!bundleSid) { console.warn('[Twilio] No approved bundle found'); continue; }
-
-              const params2: Record<string, string> = { phoneNumber: num.phoneNumber, bundleSid };
-              const addresses = await client.addresses.list({ isoCountry: cc, limit: 1 });
-              if (addresses.length) params2.addressSid = addresses[0].sid;
-
-              const purchased = await client.incomingPhoneNumbers.create(params2 as any);
-              console.log(`[Twilio] Provisioned ${purchased.phoneNumber} (${cc}) with bundle`);
-              return purchased.phoneNumber;
-            } catch (bundleErr: any) {
-              console.warn(`[Twilio] Bundle buy failed for ${num.phoneNumber}:`, bundleErr.message);
-            }
-          } else {
-            console.warn(`[Twilio] Buy failed for ${num.phoneNumber}:`, innerErr.message);
-          }
+          console.warn(`[Twilio] Buy failed for ${num.phoneNumber}:`, innerErr.message);
         }
       }
-      return null;
-    } catch (e: any) {
-      if (e.code === 21404) {
-        console.warn('[Twilio] Trial account: reusing existing provisioned number');
-        return getExistingNumber();
-      }
-      console.error(`[Twilio] buyPhoneNumber(${cc}) failed:`, e.message);
-      return null;
     }
-  };
-
-  const purchased = await tryCountry(cc);
-  if (purchased) return purchased;
+  } catch (e: any) {
+    if (e.code === 21404) {
+      console.warn('[Twilio] Trial account — reusing existing number');
+      return getExistingNumber();
+    }
+    console.error(`[Twilio] buyPhoneNumber(${cc}) failed:`, e.message);
+  }
 
   // Fallback: reuse an existing number already on this Twilio account
-  // (happens when regulatory bundles are required, e.g. UK GB numbers)
   console.warn(`[Twilio] Could not buy new number in ${cc} — falling back to existing account number`);
   return getExistingNumber();
 };
