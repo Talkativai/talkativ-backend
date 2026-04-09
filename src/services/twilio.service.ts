@@ -128,7 +128,13 @@ export const buyPhoneNumber = async (countryCode: string = 'GB'): Promise<string
     }
   };
 
-  return tryCountry(cc);
+  const purchased = await tryCountry(cc);
+  if (purchased) return purchased;
+
+  // Fallback: reuse an existing number already on this Twilio account
+  // (happens when regulatory bundles are required, e.g. UK GB numbers)
+  console.warn(`[Twilio] Could not buy new number in ${cc} — falling back to existing account number`);
+  return getExistingNumber();
 };
 
 // ─── Connect number to ElevenLabs agent ──────────────────────────────────────
