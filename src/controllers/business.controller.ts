@@ -239,7 +239,10 @@ export const setupPhone = asyncHandler(async (req: Request, res: Response) => {
         });
       }
 
-      // Connect Twilio number → ElevenLabs agent
+      // Register phone number with ElevenLabs (required for inbound call routing)
+      await elevenlabs.registerPhoneNumber(assignedNumber, elevenlabsAgentId);
+
+      // Also set voice URL directly on the Twilio number as a fallback
       await twilioService.connectNumberToAgent(assignedNumber, elevenlabsAgentId);
       await prisma.agent.update({
         where: { businessId: biz.id },

@@ -156,6 +156,36 @@ export const updateAgent = async (agentId: string, updates: Record<string, any>)
   return res.json();
 };
 
+// ─── Register a Twilio phone number with ElevenLabs and link to an agent ──────
+// ElevenLabs needs this registration to route inbound Twilio calls to the agent.
+export const registerPhoneNumber = async (phoneNumber: string, agentId: string): Promise<string | null> => {
+  try {
+    const res = await fetch(`${BASE_URL}/convai/phone-numbers`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        phone_number: phoneNumber,
+        label: 'Talkativ',
+        provider: 'twilio',
+        sid: env.TWILIO_ACCOUNT_SID,
+        token: env.TWILIO_AUTH_TOKEN,
+        agent_id: agentId,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      console.error('[ElevenLabs] registerPhoneNumber failed:', err);
+      return null;
+    }
+    const data = await res.json() as any;
+    console.log('[ElevenLabs] Phone number registered:', data.phone_number_id);
+    return data.phone_number_id ?? null;
+  } catch (e: any) {
+    console.error('[ElevenLabs] registerPhoneNumber error:', e.message);
+    return null;
+  }
+};
+
 export const deleteAgent = async (agentId: string) => {
   const res = await fetch(`${BASE_URL}/convai/agents/${agentId}`, {
     method: 'DELETE',
