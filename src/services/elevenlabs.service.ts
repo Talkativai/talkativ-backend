@@ -312,7 +312,7 @@ export const buildSystemPrompt = (business: any) => {
   - Collection: ${orderPol.collectionEnabled ? 'Enabled' : 'Disabled'}
   - Min Order Amount: £${orderPol.minOrderAmount}
   - Payment Methods Allowed: ${orderPol.deliveryPayOnDelivery || orderPol.payOnDelivery ? 'Pay on Delivery, ' : ''}${orderPol.collectionPayOnPickup ? 'Pay on Collection, ' : ''}${(orderPol.payNowEnabled || orderPol.deliveryPayNow || orderPol.collectionPayNow) ? 'Pay Now' : ''}
-  ` : '- No ordering policy set. Assume delivery and collection are both available, pay now enabled.';
+  ` : '- Ordering is NOT available. Do not accept any food orders — politely inform the caller that ordering is not currently offered.';
 
   // ── Reservation policy ─────────────────────────────────────────────────────
   const resPol = business.reservationPolicy;
@@ -321,7 +321,7 @@ export const buildSystemPrompt = (business: any) => {
   - Max Party Size: ${resPol.maxPartySize} guests
   - Booking Lead Time: ${resPol.bookingLeadTime} hours
   - Deposit Required: ${resPol.depositRequired ? `Yes. Amount: £${resPol.depositAmount} (${resPol.depositType})` : 'No'}
-  ` : '- No reservation policy set. Assume standard reservations are allowed.';
+  ` : '- Reservations are NOT available. Do not accept any table bookings — politely inform the caller that reservations are not currently offered.';
 
   // ── FAQs ───────────────────────────────────────────────────────────────────
   const faqs = (business.faqs || []).map((f: any) => `Q: ${f.question}\nA: ${f.answer}`).join('\n\n');
