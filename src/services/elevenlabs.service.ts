@@ -267,7 +267,9 @@ export const listVoices = async () => {
 
 export const buildSystemPrompt = (business: any) => {
   // ── Hours ──────────────────────────────────────────────────────────────────
-  const scheduleSource = business.agentSchedule || business.openingHours;
+  // Always use business.openingHours — the real trading hours to tell customers.
+  // agentSchedule controls when the AI is active, not what hours to advertise.
+  const scheduleSource = business.openingHours;
   let hoursStr = 'Not specified';
   if (scheduleSource) {
     if (scheduleSource.is24h === 'true' || scheduleSource.is24h === true) {
