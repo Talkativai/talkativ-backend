@@ -24,13 +24,20 @@ export const PLAN_PRICES = {
 } as const;
 
 // ─── ElevenLabs Voices ───────────────────────────────────────────────────────
+// All voices use the eleven_turbo_v2_5 model — natural, low-latency, phone-grade
 export const AVAILABLE_VOICES = [
-  { id: '21m00Tcm4TlvDq8ikWAM', name: 'Aria (Rachel)', gender: 'female', description: 'Warm, conversational' },
-  { id: 'AZnzlk1XvdvUeBnXmlld', name: 'Domi', gender: 'female', description: 'Confident' },
-  { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Bella', gender: 'female', description: 'Soft, pleasant' },
-  { id: 'MF3mGyEYCl7XYWbV9V6O', name: 'Elli', gender: 'female', description: 'Young, friendly' },
-  { id: 'ErXwobaYiN019PkySvjV', name: 'Antoni', gender: 'male', description: 'Well-rounded' },
-  { id: 'VR6AewLTigWG4xSOukaG', name: 'Arnold', gender: 'male', description: 'Crisp, professional' },
-  { id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam', gender: 'male', description: 'Deep, authoritative' },
-  { id: 'yoZ06aMxZJJ28mfd3POQ', name: 'Sam', gender: 'male', description: 'Raspy, casual' },
+  // ── Female ──────────────────────────────────────────────────────────────────
+  { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Sarah',   gender: 'female', accent: 'American', description: 'Warm & professional' },
+  { id: 'cgSgspJ2msm6clMCkdW9', name: 'Jessica', gender: 'female', accent: 'American', description: 'Friendly & bright' },
+  { id: 'XrExE9yKIg1WjnnlVkGX', name: 'Matilda', gender: 'female', accent: 'American', description: 'Knowledgeable & upbeat' },
+  { id: 'Xb7hH8MSUJpSbSDYk0k2', name: 'Alice',   gender: 'female', accent: 'British',  description: 'Clear & engaging' },
+  { id: 'pFZP5JQG7iQjIQuC4Bku', name: 'Lily',    gender: 'female', accent: 'British',  description: 'Confident & velvety' },
+  // ── Male ────────────────────────────────────────────────────────────────────
+  { id: 'cjVigY5qzO86Huf0OWal', name: 'Eric',    gender: 'male',   accent: 'American', description: 'Smooth & trustworthy' },
+  { id: 'iP95p4xoKVk53GoZ742B', name: 'Chris',   gender: 'male',   accent: 'American', description: 'Charming & down-to-earth' },
+  { id: 'onwK4e9ZLuTAKqWW03F9', name: 'Daniel',  gender: 'male',   accent: 'British',  description: 'Steady & professional' },
+  { id: 'JBFqnCBsd6RMkjVDRZzb', name: 'George',  gender: 'male',   accent: 'British',  description: 'Warm & captivating' },
+  { id: 'nPczCjzI2devNBz1zQrb', name: 'Brian',   gender: 'male',   accent: 'American', description: 'Deep & comforting' },
+  // ── Neutral ─────────────────────────────────────────────────────────────────
+  { id: 'SAz9YHcvj6GT2YYXdXww', name: 'River',   gender: 'neutral', accent: 'American', description: 'Calm & relaxed' },
 ] as const;
