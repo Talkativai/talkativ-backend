@@ -1,7 +1,7 @@
 import fs from 'fs';
+import mammoth from 'mammoth';
 import prisma from '../config/db.js';
 import * as claudeService from './claude.service.js';
-import * as visionService from './google-vision.service.js';
 import type { CategorizedData } from './claude.service.js';
 
 type SaveResult = { menuItemsCreated: number; duplicatesSkipped: number; faqsCreated: number; faqsDuplicated: number };
@@ -69,7 +69,7 @@ export const extractFromDocx = async (
   filePath: string,
   fileName: string
 ): Promise<{ categorized: CategorizedData } & SaveResult> => {
-  const rawText = await visionService.extractTextFromDocx(filePath);
+  const { value: rawText } = await mammoth.extractRawText({ path: filePath });
   try { fs.unlinkSync(filePath); } catch {}
 
   const categorized = await claudeService.categorizeExtractedData(rawText, 'pdf');
