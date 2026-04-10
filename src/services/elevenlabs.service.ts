@@ -158,9 +158,13 @@ export const updateAgent = async (agentId: string, updates: Record<string, any>)
 
 // ─── Register a Twilio phone number with ElevenLabs and link to an agent ──────
 // ElevenLabs needs this registration to route inbound Twilio calls to the agent.
+// Step 1: POST to register the number (agent_id ignored on creation by ElevenLabs)
+// Step 2: PATCH to assign the agent
 export const registerPhoneNumber = async (phoneNumber: string, agentId: string): Promise<string | null> => {
   try {
-    const res = await fetch(`${BASE_URL}/convai/phone-numbers`, {
+    // Step 1: Try to register the number
+    let phoneNumberId: string | null = null;
+    const postRes = await fetch(`${BASE_URL}/convai/phone-numbers`, {
       method: 'POST',
       headers: headers(),
       body: JSON.stringify({
@@ -169,17 +173,44 @@ export const registerPhoneNumber = async (phoneNumber: string, agentId: string):
         provider: 'twilio',
         sid: env.TWILIO_ACCOUNT_SID,
         token: env.TWILIO_AUTH_TOKEN,
-        agent_id: agentId,
       }),
     });
-    if (!res.ok) {
-      const err = await res.text();
-      console.error('[ElevenLabs] registerPhoneNumber failed:', err);
+
+    if (postRes.ok) {
+      const data = await postRes.json() as any;
+      phoneNumberId = data.phone_number_id ?? null;
+      console.log('[ElevenLabs] Phone number registered:', phoneNumberId);
+    } else {
+      // Number may already be registered — fetch existing entry
+      const err = await postRes.text();
+      console.warn('[ElevenLabs] registerPhoneNumber POST failed (may already exist):', err);
+      const listRes = await fetch(`${BASE_URL}/convai/phone-numbers`, { headers: headers() });
+      if (listRes.ok) {
+        const list = await listRes.json() as any[];
+        const existing = list.find((n: any) => n.phone_number === phoneNumber);
+        if (existing) phoneNumberId = existing.phone_number_id;
+      }
+    }
+
+    if (!phoneNumberId) {
+      console.error('[ElevenLabs] Could not get phone_number_id for', phoneNumber);
       return null;
     }
-    const data = await res.json() as any;
-    console.log('[ElevenLabs] Phone number registered:', data.phone_number_id);
-    return data.phone_number_id ?? null;
+
+    // Step 2: Assign the agent via PATCH
+    const patchRes = await fetch(`${BASE_URL}/convai/phone-numbers/${phoneNumberId}`, {
+      method: 'PATCH',
+      headers: headers(),
+      body: JSON.stringify({ agent_id: agentId }),
+    });
+    if (!patchRes.ok) {
+      const err = await patchRes.text();
+      console.error('[ElevenLabs] assignAgent PATCH failed:', err);
+    } else {
+      console.log('[ElevenLabs] Agent assigned to phone number:', phoneNumberId);
+    }
+
+    return phoneNumberId;
   } catch (e: any) {
     console.error('[ElevenLabs] registerPhoneNumber error:', e.message);
     return null;
