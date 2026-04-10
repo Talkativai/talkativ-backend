@@ -103,6 +103,24 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   const ip = req.ip || 'Unknown';
   await authService.createSession(user.id, device, ip, 'Unknown');
 
+  // Fetch onboarding status
+  const business = await prisma.business.findUnique({
+    where: { userId: user.id },
+    select: { onboardingDone: true, onboardingStep: true },
+  });
+
+  // Send incomplete onboarding reminder if > 1 hour since registration
+  if (business && !business.onboardingDone) {
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    if (user.createdAt < hourAgo) {
+      emailService.sendIncompleteOnboardingReminder(
+        user.email,
+        user.firstName || 'there',
+        business.onboardingStep || 1,
+      ).catch(() => {});
+    }
+  }
+
   // Generate tokens
   const tokens = await authService.generateTokenPair(user);
 
@@ -115,6 +133,8 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
 
   res.json({
     accessToken: tokens.accessToken,
+    onboardingDone: business?.onboardingDone ?? false,
+    onboardingStep: business?.onboardingStep ?? 1,
     user: {
       id: user.id,
       email: user.email,

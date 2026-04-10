@@ -405,3 +405,97 @@ export const sendBusinessNewReservationAlert = async (to: string, businessName: 
     `,
   });
 };
+
+// ─── Incomplete Onboarding Reminder ──────────────────────────────────────────
+export const sendIncompleteOnboardingReminder = async (to: string, firstName: string, resumeStep: number = 1) => {
+  const stepUrl = `${env.FRONTEND_URL}/#/onboarding/${resumeStep}`;
+  return resend.emails.send({
+    from,
+    to: [to],
+    subject: `You're almost there, ${firstName}! Complete your Talkativ setup`,
+    html: `
+      <div style="font-family:'Segoe UI',sans-serif;max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:16px;overflow:hidden;">
+        <div style="background:linear-gradient(135deg,#7035f5,#4b1ab5);padding:32px;">
+          <div style="font-family:'Georgia',serif;font-size:22px;font-weight:700;color:white;font-style:italic;">Talkativ</div>
+        </div>
+        <div style="padding:36px 32px;">
+          <h1 style="font-size:22px;font-weight:800;color:#130d2e;margin:0 0 12px;">Hi ${firstName}, you're almost done! 👋</h1>
+          <p style="font-size:15px;color:#6b5e8a;line-height:1.7;margin:0 0 28px;">
+            You started setting up your AI phone agent but didn't quite finish. No worries — your progress is saved and you can pick up right where you left off.
+          </p>
+          <a href="${stepUrl}" style="display:inline-block;background:linear-gradient(135deg,#7035f5,#4b1ab5);color:white;text-decoration:none;padding:15px 36px;border-radius:50px;font-size:15px;font-weight:700;box-shadow:0 6px 24px rgba(112,53,245,.35);">
+            Complete my setup →
+          </a>
+          <p style="font-size:13px;color:#9e92ba;margin:28px 0 0;line-height:1.6;">
+            Once set up, your AI agent will answer every customer call — taking orders, booking reservations, and answering questions 24/7.
+          </p>
+        </div>
+        <div style="background:#f8f6ff;padding:20px 32px;border-top:1px solid #ebe6f5;">
+          <p style="font-size:12px;color:#9e92ba;margin:0;">Questions? Reply to this email or visit <a href="https://talkativ.io" style="color:#7035f5;">talkativ.io</a></p>
+        </div>
+      </div>
+    `,
+  });
+};
+
+// ─── Onboarding Complete / Welcome to Dashboard ───────────────────────────────
+export const sendOnboardingCompleteEmail = async (to: string, firstName: string, agentName: string, businessName: string) => {
+  const dashUrl = `${env.FRONTEND_URL}/#/dashboard`;
+  return resend.emails.send({
+    from,
+    to: [to],
+    subject: `🎉 Congratulations ${firstName}! Your AI agent ${agentName} is live`,
+    html: `
+      <div style="font-family:'Segoe UI',sans-serif;max-width:580px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:16px;overflow:hidden;">
+        <div style="background:linear-gradient(135deg,#7035f5,#4b1ab5);padding:36px 32px;text-align:center;">
+          <div style="font-size:48px;margin-bottom:12px;">🎉</div>
+          <h1 style="font-size:24px;font-weight:800;color:white;margin:0 0 8px;">You're all set, ${firstName}!</h1>
+          <p style="font-size:14px;color:rgba(255,255,255,.8);margin:0;">${agentName} is now live for ${businessName}</p>
+        </div>
+        <div style="padding:36px 32px;">
+          <p style="font-size:15px;color:#6b5e8a;line-height:1.7;margin:0 0 28px;">
+            Your AI phone agent <strong style="color:#130d2e;">${agentName}</strong> is ready to take calls for <strong style="color:#130d2e;">${businessName}</strong>.
+          </p>
+          <div style="background:#f8f6ff;border:1.5px solid #ece5ff;border-radius:14px;padding:24px;margin-bottom:24px;">
+            <div style="font-size:12px;font-weight:700;color:#7035f5;text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px;">What ${agentName} can do right now</div>
+            <div style="font-size:14px;color:#2d2150;line-height:1.8;">
+              📞 Answer every inbound call instantly, 24/7<br/>
+              📋 Read out your full menu and prices<br/>
+              🕐 Tell customers your opening hours<br/>
+              ❓ Answer FAQs from your dashboard<br/>
+              👤 Transfer calls to you or a manager on request
+            </div>
+          </div>
+          <div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:14px;padding:24px;margin-bottom:24px;">
+            <div style="font-size:12px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">⚙️ One more step to unlock orders & reservations</div>
+            <p style="font-size:14px;color:#78350f;line-height:1.6;margin:0 0 10px;">
+              Before ${agentName} can take orders or book tables, configure your policies in the dashboard:
+            </p>
+            <div style="font-size:13.5px;color:#78350f;line-height:1.8;">
+              📦 <strong>Settings → Ordering</strong> — enable delivery/collection, fees, payment methods<br/>
+              📅 <strong>Settings → Reservations</strong> — party size, lead time, deposit rules
+            </div>
+          </div>
+          <div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:14px;padding:20px 24px;margin-bottom:28px;">
+            <div style="font-size:12px;font-weight:700;color:#166534;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">🚀 Dashboard walkthrough</div>
+            <div style="font-size:13.5px;color:#15803d;line-height:1.9;">
+              <strong>My Agent</strong> — Live call stats and agent status<br/>
+              <strong>Menu</strong> — Add/edit items, syncs to agent instantly<br/>
+              <strong>FAQs</strong> — Agent answers these automatically<br/>
+              <strong>Voice &amp; Script</strong> — Change voice, name and greeting<br/>
+              <strong>Settings</strong> — Ordering, reservations, business info
+            </div>
+          </div>
+          <div style="text-align:center;">
+            <a href="${dashUrl}" style="display:inline-block;background:linear-gradient(135deg,#7035f5,#4b1ab5);color:white;text-decoration:none;padding:15px 40px;border-radius:50px;font-size:15px;font-weight:700;box-shadow:0 6px 24px rgba(112,53,245,.35);">
+              Go to my dashboard →
+            </a>
+          </div>
+        </div>
+        <div style="background:#f8f6ff;padding:20px 32px;border-top:1px solid #ebe6f5;">
+          <p style="font-size:12px;color:#9e92ba;margin:0;">Need help? <a href="mailto:support@talkativ.io" style="color:#7035f5;">support@talkativ.io</a> — we reply within a few hours.</p>
+        </div>
+      </div>
+    `,
+  });
+};

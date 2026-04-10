@@ -4,6 +4,7 @@ import { ApiError } from '../utils/apiError.js';
 import prisma from '../config/db.js';
 import * as elevenlabs from '../services/elevenlabs.service.js';
 import * as twilioService from '../services/twilio.service.js';
+import * as emailService from '../services/email.service.js';
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
 const getBusinessByUserId = async (userId: string) => {
@@ -165,6 +166,20 @@ export const completeOnboarding = asyncHandler(async (req: Request, res: Respons
       console.error('ElevenLabs agent creation failed:', e);
     }
   }
+
+  // Send congratulations/walkthrough email
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { email: true, firstName: true } });
+    const agentRecord = await prisma.agent.findUnique({ where: { businessId: business.id }, select: { name: true } });
+    if (user) {
+      emailService.sendOnboardingCompleteEmail(
+        user.email,
+        user.firstName || 'there',
+        agentRecord?.name || 'your agent',
+        updated.name,
+      ).catch(() => {});
+    }
+  } catch {}
 
   res.json({ success: true, business: updated });
 });

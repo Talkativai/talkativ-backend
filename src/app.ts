@@ -73,7 +73,6 @@ app.use('/webhooks', webhookRoutes);
 app.use('/api/public', webhookRoutes);
 
 // ─── Public Business Search (for onboarding, no auth needed) ─────────────────
-import * as claudeSearch from './services/claude-search.service.js';
 import * as googlePlaces from './services/google-places.service.js';
 import * as twilioService from './services/twilio.service.js';
 import { rateLimit } from 'express-rate-limit';
