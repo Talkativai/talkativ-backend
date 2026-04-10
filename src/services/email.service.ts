@@ -339,6 +339,7 @@ export const sendSupportTicket = async (params: {
   fromEmail: string;
   fromPhone: string;
   businessName: string;
+  merchantId?: string;
 }) => {
   return resend.emails.send({
     from,
@@ -352,7 +353,8 @@ export const sendSupportTicket = async (params: {
         </div>
         <div style="padding:28px 32px;">
           <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
-            <tr><td style="padding:8px 0;font-size:13px;color:#6b5e8a;width:120px;">Business</td><td style="padding:8px 0;font-size:14px;font-weight:600;color:#130d2e;">${params.businessName}</td></tr>
+            <tr><td style="padding:8px 0;font-size:13px;color:#6b5e8a;width:130px;">Business</td><td style="padding:8px 0;font-size:14px;font-weight:600;color:#130d2e;">${params.businessName}</td></tr>
+            ${params.merchantId ? `<tr style="border-top:1px solid #f0ebff;"><td style="padding:8px 0;font-size:13px;color:#6b5e8a;">Merchant ID</td><td style="padding:8px 0;font-size:13px;font-family:monospace;color:#4b1ab5;">${params.merchantId}</td></tr>` : ''}
             <tr style="border-top:1px solid #f0ebff;"><td style="padding:8px 0;font-size:13px;color:#6b5e8a;">Email</td><td style="padding:8px 0;font-size:14px;color:#130d2e;"><a href="mailto:${params.fromEmail}" style="color:#7035f5;text-decoration:none;">${params.fromEmail}</a></td></tr>
             <tr style="border-top:1px solid #f0ebff;"><td style="padding:8px 0;font-size:13px;color:#6b5e8a;">Phone</td><td style="padding:8px 0;font-size:14px;color:#130d2e;">${params.fromPhone || '—'}</td></tr>
             <tr style="border-top:1px solid #f0ebff;"><td style="padding:8px 0;font-size:13px;color:#6b5e8a;">Subject</td><td style="padding:8px 0;font-size:14px;font-weight:600;color:#130d2e;">${params.subject}</td></tr>

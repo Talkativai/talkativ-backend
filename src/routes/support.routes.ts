@@ -7,7 +7,7 @@ const router = Router();
 router.use(authenticate);
 
 router.post('/ticket', async (req: any, res) => {
-  const { category, subject, message, email, phone } = req.body;
+  const { category, subject, message, email, phone, merchantId } = req.body;
 
   if (!category || !subject?.trim() || !message?.trim()) {
     res.status(400).json({ error: 'Category, subject and message are required.' });
@@ -15,10 +15,10 @@ router.post('/ticket', async (req: any, res) => {
   }
 
   try {
-    // Fetch business name for the email
+    // Fetch business name + id for the email
     const business = await prisma.business.findUnique({
-      where: { userId: req.user.id },
-      select: { name: true },
+      where: { userId: req.user.userId },
+      select: { name: true, id: true },
     });
 
     await sendSupportTicket({
@@ -28,6 +28,7 @@ router.post('/ticket', async (req: any, res) => {
       fromEmail: email || req.user.email || '',
       fromPhone: phone || '',
       businessName: business?.name || 'Unknown',
+      merchantId: merchantId || business?.id || '',
     });
 
     res.json({ ok: true });
