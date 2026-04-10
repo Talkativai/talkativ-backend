@@ -81,6 +81,14 @@ export const updateVoice = asyncHandler(async (req: Request, res: Response) => {
     where: { businessId },
     data: { voiceId: req.body.voiceId, voiceName: req.body.voiceName },
   });
+  // Push new voice to ElevenLabs immediately
+  if (agent.elevenlabsAgentId && req.body.voiceId) {
+    elevenlabs.updateAgent(agent.elevenlabsAgentId, {
+      conversation_config: { tts: { voice_id: req.body.voiceId } },
+    }).catch(e => console.error('[AutoSync] voice update failed:', e.message));
+  }
+  // Rebuild system prompt (greeting etc. may reference agent settings)
+  autoSyncAgent(businessId).catch(e => console.error('[AutoSync] failed:', e.message));
   res.json(agent);
 });
 
@@ -91,6 +99,8 @@ export const updateScript = asyncHandler(async (req: Request, res: Response) => 
     where: { businessId },
     data: req.body,
   });
+  // Sync greeting + system prompt to ElevenLabs
+  autoSyncAgent(businessId).catch(e => console.error('[AutoSync] failed:', e.message));
   res.json(agent);
 });
 
@@ -101,6 +111,8 @@ export const updateCallRules = asyncHandler(async (req: Request, res: Response) 
     where: { businessId },
     data: req.body,
   });
+  // Sync transfer/call rule changes to ElevenLabs system prompt
+  autoSyncAgent(businessId).catch(e => console.error('[AutoSync] failed:', e.message));
   res.json(agent);
 });
 
@@ -236,10 +248,13 @@ export const autoSyncAgent = async (businessId: string): Promise<number> => {
     },
   });
 
-  // Push to ElevenLabs
+  // Push to ElevenLabs — update system prompt and first message together
   await elevenlabs.updateAgent(agent.elevenlabsAgentId, {
     conversation_config: {
-      agent: { prompt: { prompt: systemPrompt } },
+      agent: {
+        prompt: { prompt: systemPrompt },
+        ...(agent.openingGreeting ? { first_message: agent.openingGreeting } : {}),
+      },
     },
   });
 
