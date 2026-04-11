@@ -236,10 +236,10 @@ export const getIntegrationStats = asyncHandler(async (_req: Request, res: Respo
         status: 'connected',
         balance: parseFloat(balanceData.balance).toFixed(2),
         currency: balanceData.currency,
-        thisMonthCallMinutes: voiceRec ? parseFloat(voiceRec.usage).toFixed(1) : '0',
-        thisMonthCallCost: voiceRec ? parseFloat(voiceRec.price).toFixed(4) : '0',
-        thisMonthSmsCount: smsRec ? parseInt(smsRec.count, 10) : 0,
-        thisMonthSmsCost: smsRec ? parseFloat(smsRec.price).toFixed(4) : '0',
+        thisMonthCallMinutes: voiceRec ? parseFloat(String(voiceRec.usage)).toFixed(1) : '0',
+        thisMonthCallCost: voiceRec ? parseFloat(String(voiceRec.price)).toFixed(4) : '0',
+        thisMonthSmsCount: smsRec ? parseInt(String(smsRec.count), 10) : 0,
+        thisMonthSmsCost: smsRec ? parseFloat(String(smsRec.price)).toFixed(4) : '0',
         totalCallsHandled: totalCalls,
       };
     } catch (e: any) {
@@ -258,9 +258,9 @@ export const getIntegrationStats = asyncHandler(async (_req: Request, res: Respo
       const stripeClient = new Stripe(env.STRIPE_SECRET_KEY, { apiVersion: '2025-04-30.basil' as any });
 
       const [customers, activeSubs, trialSubs, invoices] = await Promise.all([
-        stripeClient.customers.list({ limit: 1 }),
-        stripeClient.subscriptions.list({ status: 'active', limit: 1 }),
-        stripeClient.subscriptions.list({ status: 'trialing', limit: 1 }),
+        stripeClient.customers.list({ limit: 1 }) as any,
+        stripeClient.subscriptions.list({ status: 'active', limit: 1 }) as any,
+        stripeClient.subscriptions.list({ status: 'trialing', limit: 1 }) as any,
         stripeClient.invoices.list({ status: 'paid', limit: 100 }),
       ]);
 
@@ -268,9 +268,9 @@ export const getIntegrationStats = asyncHandler(async (_req: Request, res: Respo
 
       results.stripe = {
         status: 'connected',
-        totalCustomers: customers.total_count ?? 0,
-        activeSubscriptions: activeSubs.total_count ?? 0,
-        trialSubscriptions: trialSubs.total_count ?? 0,
+        totalCustomers: customers.total_count ?? customers.data?.length ?? 0,
+        activeSubscriptions: activeSubs.total_count ?? activeSubs.data?.length ?? 0,
+        trialSubscriptions: trialSubs.total_count ?? trialSubs.data?.length ?? 0,
         totalRevenue: (totalRevenueCents / 100).toFixed(2),
         currency: invoices.data[0]?.currency?.toUpperCase() ?? 'GBP',
       };
