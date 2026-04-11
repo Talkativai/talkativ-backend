@@ -168,49 +168,51 @@ export const getIntegrationStats = asyncHandler(async (_req: Request, res: Respo
       return;
     }
     try {
+      const elHeaders = {
+        'xi-api-key': env.ELEVENLABS_API_KEY,
+        'Authorization': `Bearer ${env.ELEVENLABS_API_KEY}`,
+      };
+
       const [subRes, agentsRes] = await Promise.all([
-        fetch('https://api.elevenlabs.io/v1/user', {
-          headers: { 'xi-api-key': env.ELEVENLABS_API_KEY },
-        }),
-        fetch('https://api.elevenlabs.io/v1/convai/agents?page_size=100', {
-          headers: { 'xi-api-key': env.ELEVENLABS_API_KEY },
-        }),
+        fetch('https://api.elevenlabs.io/v1/user', { headers: elHeaders }),
+        fetch('https://api.elevenlabs.io/v1/convai/agents?page_size=100', { headers: elHeaders }),
       ]);
 
-      if (!subRes.ok) {
-        results.elevenlabs = { status: 'error', message: `API returned ${subRes.status}` };
+      // Agents are required — if that fails the key is genuinely broken
+      if (!agentsRes.ok) {
+        results.elevenlabs = { status: 'error', message: `API returned ${agentsRes.status}` };
         return;
       }
 
-      const userData = await subRes.json() as any;
-      const sub = userData.subscription ?? userData;
+      const agentsData = await agentsRes.json() as any;
+      const agents: any[] = agentsData?.agents ?? [];
+      const totalAgents: number = agentsData.total_count ?? agents.length;
+      const agentList = agents.map((a: any) => ({
+        name: a.name ?? 'Unnamed agent',
+        agentId: a.agent_id,
+      }));
 
-      let agentList: { name: string; agentId: string }[] = [];
-      let totalAgents: number | null = null;
-      if (agentsRes.ok) {
-        const agentsData = await agentsRes.json() as any;
-        const agents: any[] = agentsData?.agents ?? [];
-        totalAgents = agentsData.total_count ?? agents.length;
-        agentList = agents.map((a: any) => ({
-          name: a.name ?? 'Unnamed agent',
-          agentId: a.agent_id,
-        }));
+      // Subscription data is best-effort — key may not have user-level access
+      let sub: any = null;
+      if (subRes.ok) {
+        const userData = await subRes.json() as any;
+        sub = userData.subscription ?? userData;
       }
 
-      const usedPct = sub.character_limit > 0
+      const usedPct = sub?.character_limit > 0
         ? Math.round((sub.character_count / sub.character_limit) * 100)
-        : 0;
+        : null;
 
       results.elevenlabs = {
         status: 'connected',
-        tier: sub.tier,
-        characterCount: sub.character_count,
-        characterLimit: sub.character_limit,
-        remainingCharacters: sub.character_limit - sub.character_count,
+        tier: sub?.tier ?? null,
+        characterCount: sub?.character_count ?? null,
+        characterLimit: sub?.character_limit ?? null,
+        remainingCharacters: sub ? sub.character_limit - sub.character_count : null,
         usedPercent: usedPct,
-        voiceCount: sub.voice_count ?? null,
-        voiceLimit: sub.voice_limit ?? null,
-        nextResetDate: sub.next_character_count_reset_unix
+        voiceCount: sub?.voice_count ?? null,
+        voiceLimit: sub?.voice_limit ?? null,
+        nextResetDate: sub?.next_character_count_reset_unix
           ? new Date(sub.next_character_count_reset_unix * 1000).toISOString()
           : null,
         activeAgents: totalAgents,
