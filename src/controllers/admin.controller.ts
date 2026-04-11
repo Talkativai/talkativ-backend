@@ -161,42 +161,44 @@ export const unsuspendUser = asyncHandler(async (req: Request, res: Response) =>
 export const getIntegrationStats = asyncHandler(async (_req: Request, res: Response) => {
   const results: Record<string, any> = {};
 
-  // ── ElevenLabs — subscription + agent count ──
+  // ── ElevenLabs — agents from DB + subscription from API (best-effort) ──
   await (async () => {
     if (!env.ELEVENLABS_API_KEY) {
       results.elevenlabs = { status: 'not_configured' };
       return;
     }
     try {
-      const elHeaders = {
-        'xi-api-key': env.ELEVENLABS_API_KEY,
-        'Authorization': `Bearer ${env.ELEVENLABS_API_KEY}`,
-      };
+      // Agent list comes from our own DB — always reliable
+      const dbAgents = await prisma.agent.findMany({
+        where: { elevenlabsAgentId: { not: null } },
+        select: {
+          elevenlabsAgentId: true,
+          business: { select: { name: true } },
+        },
+      });
 
-      const [subRes, agentsRes] = await Promise.all([
-        fetch('https://api.elevenlabs.io/v1/user', { headers: elHeaders }),
-        fetch('https://api.elevenlabs.io/v1/convai/agents?page_size=100', { headers: elHeaders }),
-      ]);
-
-      // Agents are required — if that fails the key is genuinely broken
-      if (!agentsRes.ok) {
-        results.elevenlabs = { status: 'error', message: `API returned ${agentsRes.status}` };
-        return;
-      }
-
-      const agentsData = await agentsRes.json() as any;
-      const agents: any[] = agentsData?.agents ?? [];
-      const totalAgents: number = agentsData.total_count ?? agents.length;
-      const agentList = agents.map((a: any) => ({
-        name: a.name ?? 'Unnamed agent',
-        agentId: a.agent_id,
+      const agentList = dbAgents.map((a: any) => ({
+        agentId: a.elevenlabsAgentId,
+        name: a.business?.name ?? 'Unnamed',
       }));
 
-      // Subscription data is best-effort — key may not have user-level access
+      // Subscription data from ElevenLabs — best-effort, both endpoint variants
       let sub: any = null;
-      if (subRes.ok) {
-        const userData = await subRes.json() as any;
-        sub = userData.subscription ?? userData;
+      for (const url of [
+        'https://api.elevenlabs.io/v1/user',
+        'https://api.elevenlabs.io/v1/user/subscription',
+      ]) {
+        try {
+          const res = await fetch(url, {
+            headers: { 'xi-api-key': env.ELEVENLABS_API_KEY },
+          });
+          console.log(`[ElevenLabs] ${url} → ${res.status}`);
+          if (res.ok) {
+            const data = await res.json() as any;
+            sub = data.subscription ?? data;
+            break;
+          }
+        } catch {}
       }
 
       const usedPct = sub?.character_limit > 0
@@ -215,7 +217,7 @@ export const getIntegrationStats = asyncHandler(async (_req: Request, res: Respo
         nextResetDate: sub?.next_character_count_reset_unix
           ? new Date(sub.next_character_count_reset_unix * 1000).toISOString()
           : null,
-        activeAgents: totalAgents,
+        activeAgents: agentList.length,
         agentList,
       };
     } catch (e: any) {
