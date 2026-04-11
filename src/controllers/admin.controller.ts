@@ -169,10 +169,10 @@ export const getIntegrationStats = asyncHandler(async (_req: Request, res: Respo
     }
     try {
       const [subRes, agentsRes] = await Promise.all([
-        fetch('https://api.elevenlabs.io/v1/user/subscription', {
+        fetch('https://api.elevenlabs.io/v1/user', {
           headers: { 'xi-api-key': env.ELEVENLABS_API_KEY },
         }),
-        fetch('https://api.elevenlabs.io/v1/convai/agents?page_size=1', {
+        fetch('https://api.elevenlabs.io/v1/convai/agents?page_size=100', {
           headers: { 'xi-api-key': env.ELEVENLABS_API_KEY },
         }),
       ]);
@@ -182,13 +182,19 @@ export const getIntegrationStats = asyncHandler(async (_req: Request, res: Respo
         return;
       }
 
-      const sub = await subRes.json() as any;
-      let agentCount: number | null = null;
+      const userData = await subRes.json() as any;
+      const sub = userData.subscription ?? userData;
+
+      let agentList: { name: string; agentId: string }[] = [];
+      let totalAgents: number | null = null;
       if (agentsRes.ok) {
         const agentsData = await agentsRes.json() as any;
-        agentCount = agentsData?.agents?.length !== undefined
-          ? agentsData.total_count ?? agentsData.agents.length
-          : null;
+        const agents: any[] = agentsData?.agents ?? [];
+        totalAgents = agentsData.total_count ?? agents.length;
+        agentList = agents.map((a: any) => ({
+          name: a.name ?? 'Unnamed agent',
+          agentId: a.agent_id,
+        }));
       }
 
       const usedPct = sub.character_limit > 0
@@ -207,14 +213,15 @@ export const getIntegrationStats = asyncHandler(async (_req: Request, res: Respo
         nextResetDate: sub.next_character_count_reset_unix
           ? new Date(sub.next_character_count_reset_unix * 1000).toISOString()
           : null,
-        activeAgents: agentCount,
+        activeAgents: totalAgents,
+        agentList,
       };
     } catch (e: any) {
       results.elevenlabs = { status: 'error', message: e.message };
     }
   })();
 
-  // ── Twilio — balance + this month's call/SMS usage ──
+  // ── Twilio — balance, provisioned numbers, usage ──
   await (async () => {
     if (!env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN) {
       results.twilio = { status: 'not_configured' };
@@ -222,24 +229,50 @@ export const getIntegrationStats = asyncHandler(async (_req: Request, res: Respo
     }
     try {
       const twilioClient = twilio(env.TWILIO_ACCOUNT_SID, env.TWILIO_AUTH_TOKEN);
-      const [balanceData, usageRecords, totalCalls] = await Promise.all([
+      const [balanceData, usageRecords, phoneNumbers, totalCalls] = await Promise.all([
         twilioClient.balance.fetch(),
-        twilioClient.usage.records.thisMonth.list({ limit: 50 }),
+        twilioClient.usage.records.thisMonth.list({ limit: 100 }),
+        twilioClient.incomingPhoneNumbers.list(),
         prisma.call.count(),
       ]);
 
-      // Pull out voice and SMS from usage records
-      const voiceRec = usageRecords.find((r: any) => r.category === 'calls');
-      const smsRec   = usageRecords.find((r: any) => r.category === 'sms');
+      const find = (cat: string) => usageRecords.find((r: any) => r.category === cat);
+      const price = (rec: any) => rec ? Math.abs(parseFloat(String(rec.price))).toFixed(4) : '0.0000';
+      const usage = (rec: any) => rec ? parseFloat(String(rec.usage)).toFixed(1) : '0.0';
+      const count = (rec: any) => rec ? parseInt(String(rec.count), 10) : 0;
+
+      // Usage categories
+      const callsRec       = find('calls');
+      const callsInRec     = find('calls-inbound');
+      const smsRec         = find('sms');
+      const numbersRec     = find('phonenumbers') ?? find('phonenumbers-local');
+
+      // Month-to-date total spend across all categories
+      const totalSpend = usageRecords.reduce((sum: number, r: any) => {
+        const p = parseFloat(String(r.price));
+        return sum + (isNaN(p) ? 0 : Math.abs(p));
+      }, 0);
 
       results.twilio = {
         status: 'connected',
         balance: parseFloat(balanceData.balance).toFixed(2),
         currency: balanceData.currency,
-        thisMonthCallMinutes: voiceRec ? parseFloat(String(voiceRec.usage)).toFixed(1) : '0',
-        thisMonthCallCost: voiceRec ? parseFloat(String(voiceRec.price)).toFixed(4) : '0',
-        thisMonthSmsCount: smsRec ? parseInt(String(smsRec.count), 10) : 0,
-        thisMonthSmsCost: smsRec ? parseFloat(String(smsRec.price)).toFixed(4) : '0',
+        // Provisioned numbers
+        activeNumbers: phoneNumbers.length,
+        activeNumbersList: phoneNumbers.map((n: any) => ({
+          friendlyName: n.friendlyName,
+          phoneNumber: n.phoneNumber,
+        })),
+        numberRentalCost: price(numbersRec),
+        // Calls
+        thisMonthCallMinutes: usage(callsRec),
+        thisMonthInboundCallMinutes: usage(callsInRec),
+        thisMonthCallCost: price(callsRec),
+        // SMS
+        thisMonthSmsCount: count(smsRec),
+        thisMonthSmsCost: price(smsRec),
+        // Totals
+        thisMonthTotalSpend: totalSpend.toFixed(2),
         totalCallsHandled: totalCalls,
       };
     } catch (e: any) {
