@@ -19,6 +19,13 @@ declare global {
   }
 }
 
+export const requireAdmin = (req: Request, _res: Response, next: NextFunction) => {
+  if (req.user?.role !== 'ADMIN') {
+    return next(ApiError.forbidden('Admin access required'));
+  }
+  next();
+};
+
 export const authenticate = async (req: Request, _res: Response, next: NextFunction) => {
   try {
     const authHeader = req.headers.authorization;
@@ -36,6 +43,10 @@ export const authenticate = async (req: Request, _res: Response, next: NextFunct
     });
     if (!user) {
       throw ApiError.unauthorized('User no longer exists');
+    }
+
+    if (user.status === 'SUSPENDED') {
+      throw ApiError.forbidden('Your account has been suspended. Please contact support.');
     }
 
     req.user = { ...decoded, businessId: user.business?.id };

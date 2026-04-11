@@ -38,16 +38,16 @@ export const createAgent = async (config: {
     {
       type: 'webhook',
       name: 'validate_delivery_address',
-      description: 'Validate a customer\'s address to ensure it falls within the delivery radius. MUST be called before creating a DELIVERY order.',
+      description: 'Validate a customer\'s postcode to check it falls within the delivery radius. MUST be called before creating a DELIVERY order.',
       url: `${env.BACKEND_URL}/webhooks/public/check-delivery`,
       method: 'POST',
       body_schema: {
         type: 'object',
         properties: {
           business_id: { type: 'string', description: `Always send EXACTLY this value: ${config.businessId}` },
-          customer_address: { type: 'string', description: 'Full address provided by the customer' },
+          customer_postal_code: { type: 'string', description: 'Postcode provided by the customer' },
         },
-        required: ['business_id', 'customer_address'],
+        required: ['business_id', 'customer_postal_code'],
       },
     },
     {
@@ -61,8 +61,7 @@ export const createAgent = async (config: {
         properties: {
           business_id: { type: 'string', description: `Always send EXACTLY this value: ${config.businessId}` },
           customer_name: { type: 'string', description: 'Full name' },
-          customer_phone: { type: 'string', description: 'Phone number' },
-          customer_email: { type: 'string', description: 'Email address, required if paying now' },
+          customer_phone: { type: 'string', description: 'Phone number — required to send payment link or confirmation by SMS' },
           delivery_address: { type: 'string', description: 'Formatted, validated delivery address if type is DELIVERY' },
           items: { type: 'string', description: 'Comma separated list of ordered items exactly as listed in the menu' },
           type: { type: 'string', enum: ['DELIVERY', 'COLLECTION', 'DINE_IN'] },
@@ -84,8 +83,7 @@ export const createAgent = async (config: {
         properties: {
           business_id: { type: 'string', description: `Always send EXACTLY this value: ${config.businessId}` },
           guest_name: { type: 'string' },
-          guest_phone: { type: 'string' },
-          guest_email: { type: 'string', description: 'Email address (required to send deposit link if applicable)' },
+          guest_phone: { type: 'string', description: 'Phone number — required to send deposit link or booking confirmation by SMS' },
           guests: { type: 'number', description: 'Number of guests attending' },
           date_time: { type: 'string', description: 'ISO date string representing the requested reservation date and time' },
         },
@@ -360,15 +358,20 @@ RULES (follow every single one, no exceptions):
 
 2. ✅ CONFIRM BEFORE ORDERING — Before finalising any order, call lookup_catalogue to confirm the exact item is currently active. If it comes back empty, say "I'm sorry, that item isn't available right now."
 
-3. 🚚 DELIVERY VALIDATION — For any delivery order, ask for the full address including postcode, then call validate_delivery_address BEFORE confirming. If outside radius, offer collection instead.
+3. 🚚 DELIVERY VALIDATION — For any delivery order, follow these steps exactly:
+   a. Ask: "Could you give me your postcode please?"
+   b. Call validate_delivery_address with the postcode.
+   c. If not_found is true — say "I'm sorry, I didn't quite catch that postcode, could you repeat it?" and try once more. If it fails a second time, apologise and say you're unable to process the delivery.
+   d. If eligible is true — say "Perfect, so that's [formatted_address], is that correct?" Wait for the customer to confirm before continuing.
+   e. If eligible is false (and not_found is false) — read out the message from the response verbatim, then offer collection as an alternative if it is available.
 
 4. 🤧 ALLERGY CHECK — Always ask "Do you have any food allergies or dietary requirements?" before finalising any order.
 
 5. 👤 MANAGER TRANSFER — ${business.agent?.transferEnabled ? 'If the customer asks to speak to a real person or manager, or is very frustrated, immediately call transfer_call.' : 'No transfer available. Politely explain and offer to take a message.'}
 
-6. 💳 PAYMENTS — Confirm payment method from what the Ordering Rules allow. If paying now, ask for email to send the payment link.
+6. 💳 PAYMENTS — Confirm payment method from what the Ordering Rules allow. Payment links and order/booking confirmations are sent by SMS to the customer's phone number. Always collect the customer's phone number before finalising any order or reservation. Never ask for an email address.
 
-7. 🔡 DATA CLARITY — If a name, email, or number is unclear, ask the customer to spell it out. Never guess an email.
+7. 🔡 DATA CLARITY — If a name or phone number is unclear, ask the customer to repeat it. For phone numbers, read it back to confirm before proceeding.
 
 8. 🤫 TOOL TRANSPARENCY — Never say "let me check the catalogue", "looking up the database", or mention any tool names. Use natural phrases like "Let me see what we have" or "One moment".
 

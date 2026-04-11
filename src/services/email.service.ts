@@ -499,3 +499,61 @@ export const sendOnboardingCompleteEmail = async (to: string, firstName: string,
     `,
   });
 };
+
+// ─── Account Suspended ────────────────────────────────────────────────────────
+export const sendAccountSuspendedEmail = async (to: string, businessName: string) => {
+  return resend.emails.send({
+    from,
+    to: [to],
+    subject: 'Important notice regarding your Talkativ account',
+    html: `
+      <div style="font-family:'Outfit',sans-serif;max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #ebe6f5;">
+        <div style="background:linear-gradient(135deg,#1a0a2e,#2d1060);padding:32px 36px;">
+          <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.5px;">Talkativ</div>
+        </div>
+        <div style="padding:32px 36px;">
+          <h2 style="color:#1a0a2e;font-size:20px;font-weight:700;margin:0 0 16px;">Account Under Review</h2>
+          <p style="color:#2d2150;font-size:15px;line-height:1.6;margin:0 0 16px;">Hi ${businessName},</p>
+          <p style="color:#2d2150;font-size:15px;line-height:1.6;margin:0 0 16px;">Your Talkativ account has been flagged for suspicious activity and is currently under review by our team. Access to your account and AI agent has been temporarily suspended while we investigate.</p>
+          <div style="background:#fff5f5;border:1.5px solid #fecaca;border-radius:10px;padding:16px 20px;margin:0 0 20px;">
+            <p style="color:#dc2626;font-size:14px;font-weight:600;margin:0;">Your AI agent has been paused and will not accept calls during this review period.</p>
+          </div>
+          <p style="color:#6b5e8a;font-size:14px;line-height:1.6;margin:0 0 16px;">If you believe this is a mistake or would like to appeal this decision, please contact our support team immediately at <a href="mailto:support@talkativ.io" style="color:#7035f5;">support@talkativ.io</a> with your account details.</p>
+          <p style="color:#9e92ba;font-size:13px;margin:0;">We aim to resolve reviews within 24–48 hours.</p>
+        </div>
+        <div style="background:#f8f6ff;padding:20px 32px;border-top:1px solid #ebe6f5;">
+          <p style="font-size:12px;color:#9e92ba;margin:0;">Talkativ Trust & Safety · <a href="mailto:support@talkativ.io" style="color:#7035f5;">support@talkativ.io</a></p>
+        </div>
+      </div>
+    `,
+  });
+};
+
+// ─── Account Reinstated ───────────────────────────────────────────────────────
+export const sendAccountReinstatedEmail = async (to: string, businessName: string) => {
+  return resend.emails.send({
+    from,
+    to: [to],
+    subject: 'Your Talkativ account has been reinstated',
+    html: `
+      <div style="font-family:'Outfit',sans-serif;max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #ebe6f5;">
+        <div style="background:linear-gradient(135deg,#1a0a2e,#2d1060);padding:32px 36px;">
+          <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.5px;">Talkativ</div>
+        </div>
+        <div style="padding:32px 36px;">
+          <h2 style="color:#1a0a2e;font-size:20px;font-weight:700;margin:0 0 16px;">Account Reinstated</h2>
+          <p style="color:#2d2150;font-size:15px;line-height:1.6;margin:0 0 16px;">Hi ${businessName},</p>
+          <p style="color:#2d2150;font-size:15px;line-height:1.6;margin:0 0 16px;">Great news — our review of your account is complete and we have confirmed that everything is in order. Your Talkativ account has been fully reinstated.</p>
+          <div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px;padding:16px 20px;margin:0 0 20px;">
+            <p style="color:#16a34a;font-size:14px;font-weight:600;margin:0;">Your AI agent is live again and ready to take calls.</p>
+          </div>
+          <p style="color:#6b5e8a;font-size:14px;line-height:1.6;margin:0;">We apologise for any inconvenience caused. If you have any questions, please reach out at <a href="mailto:support@talkativ.io" style="color:#7035f5;">support@talkativ.io</a>.</p>
+        </div>
+        <div style="background:#f8f6ff;padding:20px 32px;border-top:1px solid #ebe6f5;">
+          <p style="font-size:12px;color:#9e92ba;margin:0;">Talkativ Trust & Safety · <a href="mailto:support@talkativ.io" style="color:#7035f5;">support@talkativ.io</a></p>
+        </div>
+      </div>
+    `,
+  });
+};
+

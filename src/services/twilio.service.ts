@@ -203,6 +203,22 @@ export const detectCountryFromAddress = (address: string): string => {
   return 'GB';
 };
 
+// ─── Send SMS ─────────────────────────────────────────────────────────────────
+export const sendSms = async (to: string, body: string, fromNumber?: string): Promise<boolean> => {
+  try {
+    const from = fromNumber || env.TWILIO_PHONE_NUMBER || await getExistingNumber();
+    if (!from) {
+      console.error('[Twilio] sendSms: no from number available');
+      return false;
+    }
+    await client.messages.create({ to, from, body });
+    return true;
+  } catch (e: any) {
+    console.error('[Twilio] sendSms failed:', e.message);
+    return false;
+  }
+};
+
 // ─── Validate phone number format ────────────────────────────────────────────
 export const isValidPhoneNumber = (phone: string): boolean => {
   const cleaned = phone.replace(/\s+/g, '');

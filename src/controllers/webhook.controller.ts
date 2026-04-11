@@ -6,6 +6,7 @@ import { env } from '../config/env.js';
 import stripe from '../config/stripe.js';
 import * as stripeService from '../services/stripe.service.js';
 import * as emailService from '../services/email.service.js';
+import * as twilioService from '../services/twilio.service.js';
 import * as posService from '../services/pos.service.js';
 import * as resosService from '../services/resos.service.js';
 
@@ -187,16 +188,23 @@ function getDistanceFromLatLonInMiles(lat1: number, lon1: number, lat2: number, 
   return R * c; // Distance in miles
 }
 
-const businessCoordsCache = new Map<string, {lat: number, lon: number}>();
-
-const geocode = async (address: string) => {
+const geocodePostalCode = async (postalCode: string) => {
   try {
-    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`, {
-      headers: { 'User-Agent': env.EMAIL_FROM || 'Talkativ-AI/1.0' }
-    });
-    const data = await response.json() as any[];
-    if (data && data.length > 0) {
-      return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), formatted: data[0].display_name };
+    const apiKey = env.GOOGLE_PLACES_API;
+    if (!apiKey) {
+      console.error("GOOGLE_PLACES_API key not configured");
+      return null;
+    }
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(postalCode)}&key=${apiKey}`;
+    const response = await fetch(url);
+    const data = await response.json() as any;
+    if (data.status === 'OK' && data.results?.length > 0) {
+      const result = data.results[0];
+      const { lat, lng } = result.geometry.location;
+      return { lat, lon: lng, formatted: result.formatted_address };
+    }
+    if (data.status !== 'ZERO_RESULTS') {
+      console.error("Geocoding error:", data.status, data.error_message);
     }
   } catch (e) {
     console.error("Geocoding error", e);
@@ -204,51 +212,64 @@ const geocode = async (address: string) => {
   return null;
 };
 
-const verifyDeliveryEligibility = async (business: any, customer_address: string) => {
-  if (!business || !business.address) return { eligible: false, message: "Business address not configured." };
-  
-  const deliveryRadius = business.orderingPolicy?.deliveryRadius || 5;
+const verifyDeliveryEligibility = async (business: any, customer_postal_code: string) => {
+  if (!business || !business.address) return { eligible: false, not_found: false, message: "Business address not configured." };
 
-  let bizCoords = businessCoordsCache.get(business.id);
-  if (!bizCoords) {
-    const bGeo = await geocode(business.address);
-    if (!bGeo) return { eligible: false, message: "Could not locate the restaurant on the map. Delivery unavailable." };
+  const deliveryRadius = business.orderingPolicy?.deliveryRadius || 5;
+  const unit = business.orderingPolicy?.deliveryRadiusUnit === 'km' ? 'km' : 'miles';
+
+  // Use stored coordinates if available, otherwise geocode the business address as fallback
+  let bizCoords: { lat: number; lon: number };
+  if (business.lat != null && business.lng != null) {
+    bizCoords = { lat: business.lat, lon: business.lng };
+  } else {
+    const bGeo = await geocodePostalCode(business.address);
+    if (!bGeo) return { eligible: false, not_found: false, message: "Could not locate the restaurant. Delivery unavailable." };
     bizCoords = { lat: bGeo.lat, lon: bGeo.lon };
-    businessCoordsCache.set(business.id, bizCoords);
   }
 
-  const custGeo = await geocode(customer_address);
-  if (!custGeo) return { eligible: false, message: "I couldn't find that address on the map. Could you please provide the street number and postcode again?" };
+  const custGeo = await geocodePostalCode(customer_postal_code);
+  if (!custGeo) {
+    return { eligible: false, not_found: true, message: "I couldn't find that postcode. Could you please repeat it?" };
+  }
 
   const distanceMiles = getDistanceFromLatLonInMiles(bizCoords.lat, bizCoords.lon, custGeo.lat, custGeo.lon);
-  
-  if (business.orderingPolicy?.deliveryRadiusUnit === 'km') {
+
+  if (unit === 'km') {
     const distanceKm = distanceMiles * 1.60934;
     if (distanceKm > deliveryRadius) {
-      return { eligible: false, message: `This address is ${distanceKm.toFixed(1)} km away, which exceeds our ${deliveryRadius} km delivery radius. We cannot deliver here.` };
+      return {
+        eligible: false,
+        not_found: false,
+        message: `I'm sorry, that postcode is ${distanceKm.toFixed(1)} km away and we only deliver within ${deliveryRadius} km. Unfortunately we can't deliver there.`,
+      };
     }
   } else {
     if (distanceMiles > deliveryRadius) {
-      return { eligible: false, message: `This address is ${distanceMiles.toFixed(1)} miles away, which exceeds our ${deliveryRadius} mile delivery radius. We cannot deliver here.` };
+      return {
+        eligible: false,
+        not_found: false,
+        message: `I'm sorry, that postcode is ${distanceMiles.toFixed(1)} miles away and we only deliver within ${deliveryRadius} miles. Unfortunately we can't deliver there.`,
+      };
     }
   }
 
-  return { eligible: true, formatted_address: custGeo.formatted };
+  return { eligible: true, not_found: false, formatted_address: custGeo.formatted };
 };
 
 export const checkDeliveryAddress = asyncHandler(async (req: Request, res: Response) => {
-  const { business_id, customer_address } = req.body;
-  if (!business_id || !customer_address) {
-    res.json({ eligible: false, message: "Missing business_id or customer_address." });
+  const { business_id, customer_postal_code } = req.body;
+  if (!business_id || !customer_postal_code) {
+    res.json({ eligible: false, not_found: false, message: "Missing business_id or customer_postal_code." });
     return;
   }
 
   const business = await prisma.business.findUnique({
     where: { id: business_id },
-    include: { orderingPolicy: true }
+    include: { orderingPolicy: true },
   });
 
-  const eligibility = await verifyDeliveryEligibility(business, customer_address);
+  const eligibility = await verifyDeliveryEligibility(business, customer_postal_code);
   res.json(eligibility);
 });
 
@@ -257,7 +278,6 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
     business_id,
     customer_name,
     customer_phone,
-    customer_email,
     items,
     type,
     allergies,
@@ -360,7 +380,6 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
       callId: activeCall?.id || null,
       customerName: customer_name,
       customerPhone: customer_phone || null,
-      customerEmail: customer_email || null,
       deliveryAddress: delivery_address || null,
       items: items,
       type: orderType as any,
@@ -422,18 +441,13 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
 
   let paymentLink = null;
 
-  // If customer chooses "pay now", create a Stripe payment link
-  if (payment_method === 'pay_now' && totalAmount > 0 && customer_email) {
+  // If customer chooses "pay now", create a Stripe payment intent and send link via SMS
+  if (payment_method === 'pay_now' && totalAmount > 0 && customer_phone) {
     try {
       const paymentIntent = await stripeService.createPaymentIntent(
-        Math.round(totalAmount * 100), // Convert to pence
+        Math.round(totalAmount * 100),
         'gbp',
-        {
-          type: 'order_payment',
-          order_id: order.id,
-          business_id,
-          customer_name,
-        }
+        { type: 'order_payment', order_id: order.id, business_id, customer_name }
       );
 
       await prisma.order.update({
@@ -443,30 +457,17 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
 
       paymentLink = paymentIntent.client_secret;
 
-      // Send payment link via email if email is available
-      if (customer_email) {
-        try {
-          await emailService.sendEmail({
-            to: customer_email,
-            subject: `Payment for your order at ${business.name}`,
-            html: `
-              <h2>Your order at ${business.name}</h2>
-              <p>Hi ${customer_name},</p>
-              <p>Thank you for your order! Your total is <strong>£${totalAmount.toFixed(2)}</strong>.</p>
-              <p><strong>Order details:</strong> ${items}</p>
-              ${deliveryFee > 0 ? `<p><strong>Delivery Fee:</strong> £${deliveryFee.toFixed(2)}</p>` : ''}
-              ${allergies ? `<p><strong>⚠️ Allergies noted:</strong> ${allergies}</p>` : ''}
-              <p>Please complete your payment using the link below:</p>
-              <p><a href="${env.FRONTEND_URL}/pay?pi=${paymentIntent.client_secret}&order_id=${order.id}&type=order">Pay now →</a></p>
-            `,
-          });
-        } catch (emailErr) {
-          console.error('Failed to send payment email:', emailErr);
-        }
-      }
+      // Send payment link via SMS
+      const link = `${env.FRONTEND_URL}/pay?pi=${paymentIntent.client_secret}&order_id=${order.id}&type=order`;
+      const smsBody = `Hi ${customer_name}, your order at ${business.name} is confirmed!\n\nTotal: £${totalAmount.toFixed(2)}\nItems: ${items}\n\nPay here: ${link}`;
+      twilioService.sendSms(customer_phone, smsBody).catch(err => console.error('[SMS] Failed to send payment link:', err));
     } catch (stripeErr) {
       console.error('Failed to create payment intent:', stripeErr);
     }
+  } else if (customer_phone) {
+    // Send order confirmation SMS for pay on delivery/collection
+    const smsBody = `Hi ${customer_name}, your order at ${business.name} is confirmed!\n\nItems: ${items}${deliveryFee > 0 ? `\nDelivery fee: £${deliveryFee.toFixed(2)}` : ''}\nTotal: £${totalAmount.toFixed(2)}\nPayment: on ${orderType === 'DELIVERY' ? 'delivery' : 'collection'}${allergies ? `\n\n⚠️ Allergies noted: ${allergies}` : ''}`;
+    twilioService.sendSms(customer_phone, smsBody).catch(err => console.error('[SMS] Failed to send order confirmation:', err));
   }
 
   // Build allergy warning for staff
@@ -481,7 +482,6 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
       type: order.type,
       customerName: customer_name,
       customerPhone: customer_phone,
-      customerEmail: customer_email,
       deliveryAddress: delivery_address,
       items: items,
       notes: notes,
@@ -509,7 +509,6 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
     business_id,
     guest_name,
     guest_phone,
-    guest_email,
     guests,
     date_time,
   } = req.body;
@@ -582,7 +581,6 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
       callId: activeCall?.id || null,
       guestName: guest_name,
       guestPhone: guest_phone || null,
-      guestEmail: guest_email || null,
       guests,
       dateTime: new Date(date_time),
       status: 'PENDING',
@@ -600,19 +598,15 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
   }
 
   let paymentLink = null;
+  const formattedDate = new Date(date_time).toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-  // If deposit is required, create payment link and notify the guest
-  if (depositRequired && actualDeposit > 0 && guest_email) {
+  // If deposit is required, create payment intent and send link via SMS
+  if (depositRequired && actualDeposit > 0 && guest_phone) {
     try {
       const paymentIntent = await stripeService.createPaymentIntent(
-        Math.round(actualDeposit * 100), // Convert to pence
+        Math.round(actualDeposit * 100),
         'gbp',
-        {
-          type: 'reservation_deposit',
-          reservation_id: reservation.id,
-          business_id,
-          guest_name,
-        }
+        { type: 'reservation_deposit', reservation_id: reservation.id, business_id, guest_name }
       );
 
       await prisma.reservation.update({
@@ -622,36 +616,25 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
 
       paymentLink = paymentIntent.client_secret;
 
-      // Send deposit payment email
-      try {
-        await emailService.sendEmail({
-          to: guest_email,
-          subject: `Reservation deposit for ${business.name}`,
-          html: `
-            <h2>Your reservation at ${business.name}</h2>
-            <p>Hi ${guest_name},</p>
-            <p>Thank you for your reservation for <strong>${guests} guest${guests > 1 ? 's' : ''}</strong> on <strong>${new Date(date_time).toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</strong>.</p>
-            <p>A deposit of <strong>£${actualDeposit.toFixed(2)}</strong> is required to confirm your booking.</p>
-            <p><a href="${env.FRONTEND_URL}/pay?pi=${paymentIntent.client_secret}&reservation_id=${reservation.id}&type=reservation">Pay deposit now →</a></p>
-            <p>Your reservation will be confirmed once the deposit is received.</p>
-          `,
-        });
-      } catch (emailErr) {
-        console.error('Failed to send deposit email:', emailErr);
-      }
+      // Send deposit payment link via SMS
+      const link = `${env.FRONTEND_URL}/pay?pi=${paymentIntent.client_secret}&reservation_id=${reservation.id}&type=reservation`;
+      const smsBody = `Hi ${guest_name}, your table for ${guests} at ${business.name} on ${formattedDate} is almost confirmed!\n\nA deposit of £${actualDeposit.toFixed(2)} is required. Pay here: ${link}`;
+      twilioService.sendSms(guest_phone, smsBody).catch(err => console.error('[SMS] Failed to send deposit link:', err));
     } catch (stripeErr) {
       console.error('Failed to create deposit payment intent:', stripeErr);
     }
+  } else if (guest_phone) {
+    // No deposit — send booking confirmation SMS
+    const smsBody = `Hi ${guest_name}, your reservation for ${guests} guest${guests > 1 ? 's' : ''} at ${business.name} on ${formattedDate} is confirmed! See you then.`;
+    twilioService.sendSms(guest_phone, smsBody).catch(err => console.error('[SMS] Failed to send reservation confirmation:', err));
   }
 
   // Build response with deposit info
   let depositMessage = '';
   if (depositRequired && actualDeposit > 0) {
-    depositMessage = ` A deposit of £${actualDeposit.toFixed(2)} is required. `;
-    if (guest_email) {
-      depositMessage += `We've sent a payment link to ${guest_email}.`;
-    } else {
-      depositMessage += `Please provide your email so we can send you the payment link.`;
+    depositMessage = ` A deposit of £${actualDeposit.toFixed(2)} is required.`;
+    if (guest_phone) {
+      depositMessage += ` We've sent a payment link to their phone.`;
     }
   }
 
@@ -665,7 +648,6 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
         {
           guestName: guest_name,
           guestPhone: guest_phone || null,
-          guestEmail: guest_email || null,
           guests,
           dateTime: date_time,
           notes: depositMessage || null,
@@ -690,7 +672,6 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
       id: reservation.id,
       guestName: guest_name,
       guestPhone: guest_phone,
-      guestEmail: guest_email,
       guests: guests,
       dateTime: new Date(date_time),
       depositStatus: (depositRequired && actualDeposit > 0) ? 'Pending payment' : 'No deposit required'

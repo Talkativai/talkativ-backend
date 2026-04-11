@@ -14,6 +14,7 @@ model User {
   firstName        String
   lastName         String
   role             Role           @default(OWNER)
+  status           UserStatus     @default(ACTIVE)
   twoFactorEnabled Boolean        @default(false)
   twoFactorSecret  String?
   emailVerified    Boolean        @default(false)
@@ -66,6 +67,9 @@ model Business {
   updatedAt         DateTime              @updatedAt
   country           String                @default("")
   currency          String                @default("GBP")
+  postalCode        String?
+  lat               Float?
+  lng               Float?
   agent             Agent?
   user              User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   extractions       BusinessExtraction[]
@@ -363,6 +367,12 @@ enum Role {
   OWNER
   MANAGER
   STAFF
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
 }
 
 enum StaffRole {

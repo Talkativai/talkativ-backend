@@ -41,6 +41,7 @@ export const searchBusinesses = async (query: string): Promise<Array<{
   name: string;
   address: string;
   countryCode: string;
+  postalCode: string;
   phone: string;
   hours: string;
   openingHoursStructured: Record<string, string>;
@@ -94,10 +95,12 @@ export const searchBusinesses = async (query: string): Promise<Array<{
     return places.map((place: any, i: number) => {
       const detail = detailsList[i];
 
-      // Country code
+      // Country code + postal code
       const addrComponents = detail?.address_components || [];
       const countryComp = addrComponents.find((c: any) => c.types?.includes('country'));
       const countryCode = countryComp?.short_name || '';
+      const postalComp = addrComponents.find((c: any) => c.types?.includes('postal_code'));
+      const postalCode = postalComp?.long_name || '';
 
       // Photos (prefer detail photos, fall back to text search photos)
       const rawPhotos = (detail?.photos || place.photos || []).slice(0, 3);
@@ -121,6 +124,7 @@ export const searchBusinesses = async (query: string): Promise<Array<{
         name: detail?.name || place.name || '',
         address: detail?.formatted_address || place.formatted_address || '',
         countryCode,
+        postalCode,
         phone: detail?.international_phone_number || '',
         hours,
         openingHoursStructured,
