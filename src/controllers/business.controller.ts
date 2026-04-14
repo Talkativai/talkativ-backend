@@ -138,6 +138,8 @@ export const completeOnboarding = asyncHandler(async (req: Request, res: Respons
         const phoneConfig = await prisma.phoneConfig.findUnique({ where: { businessId: business.id } });
 
         if (phoneConfig?.assignedNumber) {
+          // Register/re-register with ElevenLabs to ensure this agent handles the number
+          await elevenlabs.registerPhoneNumber(phoneConfig.assignedNumber, elAgent.agent_id);
           await twilioService.connectNumberToAgent(phoneConfig.assignedNumber, elAgent.agent_id);
           await prisma.agent.update({
             where: { businessId: business.id },
@@ -147,6 +149,7 @@ export const completeOnboarding = asyncHandler(async (req: Request, res: Respons
           const countryCode = twilioService.detectCountryFromAddress(updated.address || '');
           const phoneNumber = await twilioService.buyPhoneNumber(countryCode);
           if (phoneNumber) {
+            await elevenlabs.registerPhoneNumber(phoneNumber, elAgent.agent_id);
             await twilioService.connectNumberToAgent(phoneNumber, elAgent.agent_id);
             await prisma.agent.update({
               where: { businessId: business.id },

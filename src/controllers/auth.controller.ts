@@ -4,8 +4,8 @@ import { ApiError } from '../utils/apiError.js';
 import prisma from '../config/db.js';
 import { env } from '../config/env.js';
 import * as authService from '../services/auth.service.js';
-import * as googleOAuth from '../services/google-oauth.service.js';
 import * as emailService from '../services/email.service.js';
+import * as googleOAuth from '../services/google-oauth.service.js';
 import jwt from 'jsonwebtoken';
 
 export const register = asyncHandler(async (req: Request, res: Response) => {
@@ -196,12 +196,12 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response) =>
   try {
     const decoded = jwt.verify(token, env.JWT_SECRET) as { userId: string };
     const newHash = await authService.hashPassword(newPassword);
-    
+
     await prisma.user.update({
       where: { id: decoded.userId },
       data: { passwordHash: newHash }
     });
-    
+
     await authService.revokeAllUserTokens(decoded.userId);
     res.json({ message: 'Password reset successfully' });
   } catch (err) {
@@ -259,7 +259,8 @@ export const staffLogin = asyncHandler(async (req: Request, res: Response) => {
   });
 });
 
-// ─── Google OAuth ────────────────────────────────────────────────────────────
+// ─── Google OAuth ─────────────────────────────────────────────────────────────
+
 export const googleAuthRedirect = asyncHandler(async (req: Request, res: Response) => {
   const state = (req.query.state as string) || 'login';
   const url = googleOAuth.getAuthUrl(state);
@@ -267,53 +268,55 @@ export const googleAuthRedirect = asyncHandler(async (req: Request, res: Respons
 });
 
 export const googleAuthCallback = asyncHandler(async (req: Request, res: Response) => {
-  const { code, state } = req.query;
-  if (!code || typeof code !== 'string') {
-    throw ApiError.badRequest('Missing authorization code');
-  }
+  const { code } = req.query as { code: string };
+  if (!code) return res.redirect(`${env.FRONTEND_URL}/#/login?error=no_code`);
 
-  // Exchange code for tokens
-  const tokens = await googleOAuth.getTokens(code);
-  if (!tokens.access_token) {
-    throw ApiError.badRequest('Failed to get access token from Google');
-  }
+  try {
+    const tokens = await googleOAuth.getTokens(code);
+    if (!tokens.access_token) throw new Error('No access token from Google');
 
-  // Get user profile from Google
-  const profile = await googleOAuth.getUserInfo(tokens.access_token);
-  const frontendUrl = env.FRONTEND_URL;
+    const profile = await googleOAuth.getUserInfo(tokens.access_token);
+    const user = await googleOAuth.findOrCreateUser({
+      id: profile.id,
+      email: profile.email,
+      given_name: profile.given_name,
+      family_name: profile.family_name,
+    });
 
-  // ── Register flow: return profile data to pre-fill the form ────────────────
-  if (state === 'register') {
-    res.redirect(
-      `${frontendUrl}?google_signup=true` +
-      `&google_email=${encodeURIComponent(profile.email)}` +
-      `&google_firstName=${encodeURIComponent(profile.given_name || '')}` +
-      `&google_lastName=${encodeURIComponent(profile.family_name || '')}`
+    if (user.status === 'SUSPENDED') {
+      return res.redirect(`${env.FRONTEND_URL}/#/login?error=suspended`);
+    }
+
+    const jwtTokens = await authService.generateTokenPair(user);
+    await authService.createSession(
+      user.id,
+      req.headers['user-agent'] || 'Unknown',
+      req.ip || 'Unknown',
+      'Unknown',
     );
-    return;
+
+    const business = await prisma.business.findUnique({
+      where: { userId: user.id },
+      select: { onboardingDone: true, onboardingStep: true },
+    });
+
+    res.cookie('refresh_token', jwtTokens.refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    // Send welcome email for brand-new Google users (best effort)
+    emailService.sendWelcomeEmail(user.email, user.firstName).catch(() => {});
+
+    const dest = user.role === 'ADMIN' ? '/#/admin'
+      : !business?.onboardingDone ? `/#/onboarding/${business?.onboardingStep || 1}`
+      : '/#/dashboard';
+
+    res.redirect(`${env.FRONTEND_URL}${dest}`);
+  } catch (err) {
+    console.error('[Google OAuth] Callback error:', err);
+    res.redirect(`${env.FRONTEND_URL}/#/login?error=oauth_failed`);
   }
-
-  // ── Login flow: find or create user and issue tokens ───────────────────────
-  const user = await googleOAuth.findOrCreateUser({
-    id: profile.id,
-    email: profile.email,
-    given_name: profile.given_name || 'User',
-    family_name: profile.family_name || '',
-  });
-
-  const jwtTokens = await authService.generateTokenPair(user);
-
-  await authService.createSession(user.id, req.headers['user-agent'] || 'Unknown', req.ip || 'Unknown', 'Unknown');
-
-  res.cookie('refresh_token', jwtTokens.refreshToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  });
-
-  res.redirect(
-    `${frontendUrl}?auth_token=${jwtTokens.accessToken}&user_id=${user.id}&user_email=${encodeURIComponent(user.email)}&user_role=${user.role}&user_firstName=${encodeURIComponent(user.firstName)}&user_lastName=${encodeURIComponent(user.lastName)}`
-  );
 });
-

@@ -24,7 +24,7 @@ router.post('/reset-password/:token', authLimiter, validate(resetPasswordSchema)
 // Email verification (public)
 router.post('/verify-email/:token', authController.verifyEmail);
 
-// Google OAuth (public)
+// Google OAuth
 router.get('/google', authController.googleAuthRedirect);
 router.get('/google/callback', authController.googleAuthCallback);
 
