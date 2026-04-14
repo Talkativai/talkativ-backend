@@ -18,6 +18,7 @@ router.put('/notifications', settingsController.updateNotifications);
 // Phone
 router.get('/phone', settingsController.getPhoneConfig);
 router.put('/phone', settingsController.updatePhoneConfig);
+router.post('/phone/reconnect', settingsController.reconnectPhone);
 
 // Password
 router.put('/password', validate(changePasswordSchema), settingsController.changePassword);
