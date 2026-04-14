@@ -33,6 +33,9 @@ const envSchema = z.object({
   AUTH_LOGIN_HASH: z.string(),
   AUTH_REGISTER_HASH: z.string(),
 
+  // Clerk authentication (commented out — using Google OAuth)
+  // CLERK_SECRET_KEY: z.string().default(''),
+
   // Google OAuth
   GOOGLE_CLIENT_ID: z.string().default(''),
   GOOGLE_CLIENT_SECRET: z.string().default(''),

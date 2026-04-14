@@ -113,15 +113,119 @@ export const stripeWebhook = asyncHandler(async (req: Request, res: Response) =>
       const metadata = paymentIntent.metadata || {};
 
       if (metadata.type === 'order_payment' && metadata.order_id) {
-        await prisma.order.update({
+        const order = await prisma.order.update({
           where: { id: metadata.order_id },
-          data: { paymentStatus: 'paid' },
+          data: { paymentStatus: 'paid', status: 'CONFIRMED' },
+          include: { business: { include: { notifSettings: true } } },
         });
+
+        const amountPaid = paymentIntent.amount / 100;
+
+        // ── Send customer payment confirmation ────────────────────────────────
+        if (order.customerPhone) {
+          // SMS confirmation
+          twilioService.sendSms(
+            order.customerPhone,
+            `Hi ${order.customerName}, your payment of £${amountPaid.toFixed(2)} to ${order.business.name} is confirmed! Order #${order.id.slice(0, 8)} is being prepared.`,
+          ).catch(err => console.error('[SMS] Order payment confirm failed:', err));
+        }
+        // Email confirmation (if customer email known)
+        if (order.customerEmail) {
+          emailService.sendOrderPaymentConfirmation(
+            order.customerEmail,
+            order.customerName,
+            order.business.name,
+            order.id,
+            order.items,
+            amountPaid,
+          ).catch(err => console.error('[Email] Order payment confirm to customer failed:', err));
+        }
+
+        // ── Notify business that payment was received ─────────────────────────
+        if (order.business.email && order.business.notifSettings?.emailNewOrder !== false) {
+          emailService.sendBusinessOrderPaymentReceived(
+            order.business.email,
+            order.business.name,
+            order.id,
+            order.customerName,
+            order.customerPhone,
+            order.items,
+            amountPaid,
+          ).catch(err => console.error('[Email] Business order payment alert failed:', err));
+        }
+
       } else if (metadata.type === 'reservation_deposit' && metadata.reservation_id) {
-        await prisma.reservation.update({
+        const reservation = await prisma.reservation.update({
           where: { id: metadata.reservation_id },
-          data: { depositPaid: true },
+          data: { depositPaid: true, status: 'CONFIRMED' },
+          include: {
+            business: { include: { notifSettings: true, integrations: true } },
+          },
         });
+
+        const depositPaid = paymentIntent.amount / 100;
+
+        // ── Push to resOS now that deposit is confirmed ───────────────────────
+        const resosIntegration = reservation.business.integrations?.find(
+          (i: any) => i.name === 'resOS' && i.status === 'CONNECTED',
+        );
+        if (resosIntegration) {
+          const cfg = resosIntegration.config as any;
+          if (cfg?.apiKey && cfg?.propertyId) {
+            resosService.createResOSReservation(cfg.apiKey, cfg.propertyId, {
+              guestName: reservation.guestName,
+              guestPhone: reservation.guestPhone,
+              guests: reservation.guests,
+              dateTime: reservation.dateTime.toISOString(),
+              notes: `Deposit of £${depositPaid.toFixed(2)} paid via Talkativ`,
+            }).then(async (result) => {
+              if (result.success && result.reservationId) {
+                await prisma.reservation.update({
+                  where: { id: reservation.id },
+                  data: { externalId: result.reservationId },
+                });
+              }
+            }).catch(err => console.error('[resOS] Post-deposit push failed:', err));
+          }
+        }
+
+        // ── SMS confirmation to guest ─────────────────────────────────────────
+        const formattedDate = reservation.dateTime.toLocaleDateString('en-GB', {
+          weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
+        });
+        if (reservation.guestPhone) {
+          twilioService.sendSms(
+            reservation.guestPhone,
+            `Hi ${reservation.guestName}, your deposit of £${depositPaid.toFixed(2)} for ${reservation.business.name} on ${formattedDate} is confirmed! Booking ref: #${reservation.id.slice(0, 8)}`,
+          ).catch(err => console.error('[SMS] Deposit confirm failed:', err));
+        }
+
+        // ── Email confirmation to guest ───────────────────────────────────────
+        if (reservation.guestEmail) {
+          emailService.sendReservationDepositConfirmation(
+            reservation.guestEmail,
+            reservation.guestName,
+            reservation.business.name,
+            reservation.dateTime,
+            reservation.guests,
+            depositPaid,
+            reservation.id,
+          ).catch(err => console.error('[Email] Deposit confirm to guest failed:', err));
+        }
+
+        // ── Notify business that deposit was received ─────────────────────────
+        if (reservation.business.email && reservation.business.notifSettings?.emailNewReservation !== false) {
+          emailService.sendBusinessDepositReceived(
+            reservation.business.email,
+            reservation.business.name,
+            reservation.id,
+            reservation.guestName,
+            reservation.guestPhone,
+            reservation.guests,
+            reservation.dateTime,
+            depositPaid,
+          ).catch(err => console.error('[Email] Business deposit alert failed:', err));
+        }
       }
       break;
     }
@@ -639,7 +743,9 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
   }
 
   // ── Push to resOS if connected ────────────────────────────────────────────
-  if (reservationIntegration) {
+  // Only push immediately if no deposit is required.
+  // When deposit IS required, the push happens in the Stripe webhook AFTER payment.
+  if (reservationIntegration && !(depositRequired && actualDeposit > 0)) {
     const config = reservationIntegration.config as any;
     if (config?.apiKey && config?.propertyId) {
       const resosResult = await resosService.createResOSReservation(
@@ -664,6 +770,8 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
         console.error('[resOS] Push failed but reservation saved locally:', resosResult.message);
       }
     }
+  } else if (depositRequired && actualDeposit > 0) {
+    console.log(`[resOS] Deposit required — deferring resOS push until deposit is paid.`);
   }
 
   // Send business notification email
@@ -692,4 +800,190 @@ export const checkHours = asyncHandler(async (req: Request, res: Response) => {
   const business = await prisma.business.findUnique({ where: { id: business_id } });
   if (!business) throw ApiError.notFound('Business not found');
   res.json({ hours: business.openingHours || 'Hours not set' });
+});
+
+// ─── Cancel Reservation (agent tool) ─────────────────────────────────────────
+// Called by ElevenLabs agent when a caller wants to cancel their reservation.
+export const cancelReservation = asyncHandler(async (req: Request, res: Response) => {
+  const { reservation_id, business_id, guest_phone } = req.body;
+
+  if (!reservation_id && !guest_phone) {
+    res.json({ error: true, message: 'Please provide the booking reference or the phone number used when booking.' });
+    return;
+  }
+
+  // Look up reservation by ID or phone, scoped to this business
+  const reservation = await prisma.reservation.findFirst({
+    where: {
+      businessId: business_id,
+      status: { not: 'CANCELLED' },
+      ...(reservation_id ? { id: reservation_id } : {}),
+      ...(guest_phone && !reservation_id ? { guestPhone: guest_phone } : {}),
+    },
+    include: {
+      business: { include: { integrations: true, notifSettings: true } },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  if (!reservation) {
+    res.json({ error: true, message: "I couldn't find an active reservation with those details. Please double-check the booking reference or phone number." });
+    return;
+  }
+
+  // Cancel in our DB
+  await prisma.reservation.update({
+    where: { id: reservation.id },
+    data: { status: 'CANCELLED' },
+  });
+
+  // Cancel in resOS if linked
+  if (reservation.externalId) {
+    const resosIntegration = reservation.business.integrations?.find(
+      (i: any) => i.name === 'resOS' && i.status === 'CONNECTED',
+    );
+    if (resosIntegration) {
+      const cfg = resosIntegration.config as any;
+      if (cfg?.apiKey && cfg?.propertyId) {
+        resosService.cancelResOSReservation(cfg.apiKey, cfg.propertyId, reservation.externalId)
+          .catch(err => console.error('[resOS] Cancel failed:', err));
+      }
+    }
+  }
+
+  const formattedDate = reservation.dateTime.toLocaleDateString('en-GB', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+
+  // SMS to guest
+  if (reservation.guestPhone) {
+    twilioService.sendSms(
+      reservation.guestPhone,
+      `Hi ${reservation.guestName}, your reservation at ${reservation.business.name} on ${formattedDate} has been cancelled. Booking ref: #${reservation.id.slice(0, 8)}.`,
+    ).catch(err => console.error('[SMS] Cancellation confirm failed:', err));
+  }
+
+  // Email alerts
+  if (reservation.guestEmail) {
+    emailService.sendReservationCancellationToGuest(
+      reservation.guestEmail,
+      reservation.guestName,
+      reservation.business.name,
+      reservation.dateTime,
+      reservation.id,
+    ).catch(() => {});
+  }
+
+  if (reservation.business.email && reservation.business.notifSettings?.emailNewReservation !== false) {
+    emailService.sendBusinessReservationCancelled(
+      reservation.business.email,
+      reservation.business.name,
+      reservation.id,
+      reservation.guestName,
+      reservation.guestPhone,
+      reservation.dateTime,
+    ).catch(() => {});
+  }
+
+  let depositNote = '';
+  const depositAmountNum = Number(reservation.depositAmount ?? 0);
+  if (reservation.depositPaid && depositAmountNum > 0) {
+    depositNote = ` As a deposit of £${depositAmountNum.toFixed(2)} was paid, please contact ${reservation.business.name} directly to discuss any refund.`;
+  }
+
+  res.json({
+    success: true,
+    reservation_id: reservation.id,
+    confirmation: `Reservation for ${reservation.guestName} on ${formattedDate} has been cancelled.${depositNote}`,
+  });
+});
+
+// ─── Update Reservation (agent tool) ──────────────────────────────────────────
+// Called by ElevenLabs agent when a caller wants to change date/time or party size.
+export const updateReservation = asyncHandler(async (req: Request, res: Response) => {
+  const { reservation_id, business_id, guest_phone, new_date_time, new_guests } = req.body;
+
+  if (!reservation_id && !guest_phone) {
+    res.json({ error: true, message: 'Please provide the booking reference or the phone number used when booking.' });
+    return;
+  }
+
+  if (!new_date_time && !new_guests) {
+    res.json({ error: true, message: 'Please specify what you would like to change — the date/time or the number of guests.' });
+    return;
+  }
+
+  const reservation = await prisma.reservation.findFirst({
+    where: {
+      businessId: business_id,
+      status: { not: 'CANCELLED' },
+      ...(reservation_id ? { id: reservation_id } : {}),
+      ...(guest_phone && !reservation_id ? { guestPhone: guest_phone } : {}),
+    },
+    include: {
+      business: { include: { integrations: true, notifSettings: true } },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  if (!reservation) {
+    res.json({ error: true, message: "I couldn't find an active reservation with those details. Please double-check the booking reference or phone number." });
+    return;
+  }
+
+  // Validate new date if business hours exist
+  if (new_date_time && reservation.business.openingHours) {
+    const newDate = new Date(new_date_time);
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayName = dayNames[newDate.getDay()];
+    const hours = reservation.business.openingHours as Record<string, any>;
+    if (hours[dayName]?.closed) {
+      res.json({ error: true, message: `Sorry, we're closed on ${dayName}. Please choose a different day.` });
+      return;
+    }
+  }
+
+  const updatedData: any = {};
+  if (new_date_time) updatedData.dateTime = new Date(new_date_time);
+  if (new_guests) updatedData.guests = Number(new_guests);
+
+  await prisma.reservation.update({ where: { id: reservation.id }, data: updatedData });
+
+  // Sync update to resOS if linked
+  if (reservation.externalId) {
+    const resosIntegration = reservation.business.integrations?.find(
+      (i: any) => i.name === 'resOS' && i.status === 'CONNECTED',
+    );
+    if (resosIntegration) {
+      const cfg = resosIntegration.config as any;
+      if (cfg?.apiKey && cfg?.propertyId) {
+        resosService.updateResOSReservation(cfg.apiKey, cfg.propertyId, reservation.externalId, {
+          ...(new_date_time ? { dateTime: new Date(new_date_time).toISOString() } : {}),
+          ...(new_guests ? { guests: Number(new_guests) } : {}),
+        }).catch(err => console.error('[resOS] Update failed:', err));
+      }
+    }
+  }
+
+  const finalDate = new_date_time ? new Date(new_date_time) : reservation.dateTime;
+  const finalGuests = new_guests ? Number(new_guests) : reservation.guests;
+  const formattedDate = finalDate.toLocaleDateString('en-GB', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+
+  // SMS update confirmation
+  if (reservation.guestPhone) {
+    twilioService.sendSms(
+      reservation.guestPhone,
+      `Hi ${reservation.guestName}, your reservation at ${reservation.business.name} has been updated.\n\nNew details — Date: ${formattedDate}, Party size: ${finalGuests} guest${finalGuests > 1 ? 's' : ''}. Booking ref: #${reservation.id.slice(0, 8)}.`,
+    ).catch(err => console.error('[SMS] Reservation update failed:', err));
+  }
+
+  res.json({
+    success: true,
+    reservation_id: reservation.id,
+    confirmation: `Reservation updated! New date: ${formattedDate}, party of ${finalGuests}. A confirmation SMS has been sent to the guest.`,
+    new_date_time: finalDate.toISOString(),
+    new_guests: finalGuests,
+  });
 });

@@ -9,7 +9,23 @@ export const getBilling = asyncHandler(async (req: Request, res: Response) => {
   const businessId = req.user!.businessId;
   if (!businessId) throw ApiError.notFound('Business not found');
   const subscription = await prisma.subscription.findUnique({ where: { businessId } });
-  res.json(subscription || { plan: 'NONE', status: 'NO_SUBSCRIPTION' });
+  if (!subscription) return res.json({ plan: 'NONE', status: 'NO_SUBSCRIPTION' });
+
+  // If we have a Stripe customer but no cached card details, try to fetch from Stripe
+  if (subscription.stripeCustomerId && !subscription.cardLast4 && env.STRIPE_SECRET_KEY) {
+    try {
+      const paymentMethods = await stripeService.getDefaultPaymentMethod(subscription.stripeCustomerId);
+      if (paymentMethods) {
+        await prisma.subscription.update({
+          where: { id: subscription.id },
+          data: { cardBrand: paymentMethods.brand, cardLast4: paymentMethods.last4 },
+        });
+        return res.json({ ...subscription, cardBrand: paymentMethods.brand, cardLast4: paymentMethods.last4 });
+      }
+    } catch {}
+  }
+
+  res.json(subscription);
 });
 
 export const getInvoices = asyncHandler(async (req: Request, res: Response) => {
@@ -105,8 +121,17 @@ export const subscribe = asyncHandler(async (req: Request, res: Response) => {
   }
 
   // Attach payment method to customer if provided
+  let cardBrand: string | null = null;
+  let cardLast4: string | null = null;
+
   if (paymentMethodId) {
     await stripeService.attachPaymentMethod(paymentMethodId, customerId);
+    // Fetch card details to store for display
+    try {
+      const pm = await stripeService.getPaymentMethodDetails(paymentMethodId);
+      cardBrand = pm?.brand ?? null;
+      cardLast4 = pm?.last4 ?? null;
+    } catch {}
   }
 
   // Create subscription with 14-day trial
@@ -117,7 +142,7 @@ export const subscribe = asyncHandler(async (req: Request, res: Response) => {
     defaultPaymentMethod: paymentMethodId,
   });
 
-  // Save to DB
+  // Save to DB (including card display details)
   const subscription = await prisma.subscription.upsert({
     where: { businessId },
     update: {
@@ -126,6 +151,8 @@ export const subscribe = asyncHandler(async (req: Request, res: Response) => {
       plan,
       status: 'TRIALING',
       trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+      ...(cardBrand && { cardBrand }),
+      ...(cardLast4 && { cardLast4 }),
     },
     create: {
       businessId,
@@ -134,6 +161,8 @@ export const subscribe = asyncHandler(async (req: Request, res: Response) => {
       plan,
       status: 'TRIALING',
       trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+      cardBrand,
+      cardLast4,
     },
   });
 
@@ -178,4 +207,78 @@ export const getPortal = asyncHandler(async (req: Request, res: Response) => {
 
   const session = await stripeService.createPortalSession(subscription.stripeCustomerId, `${env.FRONTEND_URL}/billing`);
   res.json({ url: session.url });
+});
+
+// ─── Attach test card (test-mode only) ───────────────────────────────────────
+// Creates a Stripe test PaymentMethod (Visa 4242) and attaches it to the customer,
+// then creates the trial subscription without requiring a real card form.
+export const attachTestCard = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
+
+  // Only available in Stripe test mode
+  if (!env.STRIPE_SECRET_KEY || !env.STRIPE_SECRET_KEY.startsWith('sk_test_')) {
+    throw ApiError.badRequest('Test card attachment is only available in test mode');
+  }
+
+  const { plan } = req.body;
+  const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+  if (!user) throw ApiError.notFound('User not found');
+
+  // Get or create Stripe customer
+  let existingSub = await prisma.subscription.findUnique({ where: { businessId } });
+  let customerId = existingSub?.stripeCustomerId;
+
+  if (!customerId) {
+    const customer = await stripeService.createCustomer(user.email, `${user.firstName} ${user.lastName}`);
+    customerId = customer.id;
+  }
+
+  // Create a test PaymentMethod using Stripe's tok_visa test token
+  const testPaymentMethod = await stripeService.createTestPaymentMethod(customerId);
+  const cardBrand = testPaymentMethod.brand;
+  const cardLast4 = testPaymentMethod.last4;
+
+  // Build subscription — if no valid priceId configured, just create a local trial record
+  const priceId = req.body.priceId;
+  let stripeSubId: string | null = null;
+
+  if (priceId && priceId.startsWith('price_')) {
+    const stripeSub = await stripeService.createSubscription({
+      customerId,
+      priceId,
+      trialDays: 14,
+      defaultPaymentMethod: testPaymentMethod.paymentMethodId,
+    });
+    stripeSubId = stripeSub.id;
+  }
+
+  const subscription = await prisma.subscription.upsert({
+    where: { businessId },
+    update: {
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: stripeSubId,
+      plan: (plan || 'STARTER').toUpperCase() as any,
+      status: 'TRIALING',
+      trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+      cardBrand,
+      cardLast4,
+    },
+    create: {
+      businessId,
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: stripeSubId,
+      plan: (plan || 'STARTER').toUpperCase() as any,
+      status: 'TRIALING',
+      trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+      cardBrand,
+      cardLast4,
+    },
+  });
+
+  res.status(201).json({
+    ...subscription,
+    testMode: true,
+    message: `Test card (${cardBrand?.toUpperCase()} •••• ${cardLast4}) attached successfully`,
+  });
 });

@@ -7,6 +7,8 @@ import * as authService from '../services/auth.service.js';
 import * as emailService from '../services/email.service.js';
 import * as googleOAuth from '../services/google-oauth.service.js';
 import jwt from 'jsonwebtoken';
+// import { createClerkClient, verifyToken as verifyClerkToken } from '@clerk/backend'; // commented out — using Google OAuth
+// const clerkClient = createClerkClient({ secretKey: env.CLERK_SECRET_KEY }); // commented out
 
 export const register = asyncHandler(async (req: Request, res: Response) => {
   const { email, password, firstName, lastName, googleId } = req.body;
@@ -320,3 +322,6 @@ export const googleAuthCallback = asyncHandler(async (req: Request, res: Respons
     res.redirect(`${env.FRONTEND_URL}/#/login?error=oauth_failed`);
   }
 });
+
+// ─── Clerk SSO Auth (commented out — using Google OAuth) ─────────────────────
+// export const clerkAuth = asyncHandler(async (req: Request, res: Response) => { ... });

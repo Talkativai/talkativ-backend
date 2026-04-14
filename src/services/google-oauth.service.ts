@@ -32,31 +32,23 @@ export const getUserInfo = async (accessToken: string) => {
   });
   if (!res.ok) throw new Error('Failed to get Google user info');
   return res.json() as Promise<{
-    id: string;
-    email: string;
-    name: string;
-    given_name: string;
-    family_name: string;
-    picture: string;
+    id: string; email: string; name: string;
+    given_name: string; family_name: string; picture: string;
   }>;
 };
 
 export const findOrCreateUser = async (profile: {
-  id: string;
-  email: string;
-  given_name: string;
-  family_name: string;
+  id: string; email: string; given_name: string; family_name: string;
 }) => {
   let user = await prisma.user.findFirst({ where: { googleId: profile.id } });
   if (user) return user;
 
   user = await prisma.user.findUnique({ where: { email: profile.email } });
   if (user) {
-    user = await prisma.user.update({
+    return prisma.user.update({
       where: { id: user.id },
       data: { googleId: profile.id, emailVerified: true },
     });
-    return user;
   }
 
   user = await prisma.user.create({
@@ -70,14 +62,7 @@ export const findOrCreateUser = async (profile: {
   });
 
   await prisma.business.create({
-    data: {
-      userId: user.id,
-      name: '',
-      type: '',
-      address: '',
-      phone: '',
-      onboardingStep: 1,
-    },
+    data: { userId: user.id, name: '', type: '', address: '', phone: '', onboardingStep: 1 },
   });
 
   return user;

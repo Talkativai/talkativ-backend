@@ -321,6 +321,8 @@ model Subscription {
   trialEndsAt          DateTime?
   currentPeriodEnd     DateTime?
   cancelAtPeriodEnd    Boolean            @default(false)
+  cardBrand            String?            // e.g. "visa", "mastercard"
+  cardLast4            String?            // e.g. "4242"
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
   invoices             Invoice[]

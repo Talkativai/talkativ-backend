@@ -24,8 +24,11 @@ router.post('/reset-password/:token', authLimiter, validate(resetPasswordSchema)
 // Email verification (public)
 router.post('/verify-email/:token', authController.verifyEmail);
 
-// Google OAuth
+// ── Google OAuth ──────────────────────────────────────────────────────────────
 router.get('/google', authController.googleAuthRedirect);
 router.get('/google/callback', authController.googleAuthCallback);
+
+// ── Clerk SSO exchange (commented out — using Google OAuth) ───────────────────
+// router.post('/clerk', authLimiter, authController.clerkAuth);
 
 export default router;

@@ -529,6 +529,249 @@ export const sendAccountSuspendedEmail = async (to: string, businessName: string
   });
 };
 
+// ─── Order Payment Confirmation (to customer) ────────────────────────────────
+export const sendOrderPaymentConfirmation = async (
+  to: string,
+  customerName: string,
+  businessName: string,
+  orderId: string,
+  items: string,
+  total: number,
+) => {
+  return resend.emails.send({
+    from,
+    to: [to],
+    subject: `Payment confirmed — Order #${orderId.slice(0, 8)} at ${businessName}`,
+    html: `
+      <div style="font-family:'Segoe UI',sans-serif;max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:16px;overflow:hidden;">
+        <div style="background:#f0fdf4;padding:32px 36px;border-bottom:1px solid #bbf7d0;">
+          <h1 style="color:#166534;margin:0;font-size:20px;font-weight:700;">Payment Confirmed ✓</h1>
+          <p style="color:#15803d;font-size:14px;margin:6px 0 0;">Thank you, ${customerName}! Your order is now being prepared.</p>
+        </div>
+        <div style="padding:32px 36px;">
+          <div style="background:#f8f6ff;border:1.5px solid #ece5ff;border-radius:12px;padding:20px 24px;margin-bottom:20px;">
+            <div style="margin-bottom:10px;display:flex;justify-content:space-between;">
+              <span style="font-size:13px;color:#6b5e8a;">Order ID</span>
+              <strong style="font-size:13px;color:#130d2e;">#${orderId.slice(0, 8)}</strong>
+            </div>
+            <div style="margin-bottom:10px;display:flex;justify-content:space-between;border-top:1px solid #ece5ff;padding-top:10px;">
+              <span style="font-size:13px;color:#6b5e8a;">Restaurant</span>
+              <span style="font-size:13px;color:#130d2e;">${businessName}</span>
+            </div>
+            <div style="margin-bottom:10px;display:flex;justify-content:space-between;border-top:1px solid #ece5ff;padding-top:10px;">
+              <span style="font-size:13px;color:#6b5e8a;">Items</span>
+              <span style="font-size:13px;color:#130d2e;text-align:right;max-width:240px;">${items}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;border-top:1px solid #ece5ff;padding-top:10px;">
+              <strong style="font-size:15px;color:#130d2e;">Total Paid</strong>
+              <strong style="font-size:15px;color:#7035f5;">£${total.toFixed(2)}</strong>
+            </div>
+          </div>
+          <p style="color:#9e92ba;font-size:13px;margin:0;line-height:1.6;">Keep this email as your receipt. Contact ${businessName} directly if you have any questions about your order.</p>
+        </div>
+      </div>
+    `,
+  });
+};
+
+// ─── Business: Order Payment Received ────────────────────────────────────────
+export const sendBusinessOrderPaymentReceived = async (
+  to: string,
+  businessName: string,
+  orderId: string,
+  customerName: string,
+  customerPhone: string | null,
+  items: string,
+  total: number,
+) => {
+  return resend.emails.send({
+    from,
+    to: [to],
+    subject: `💳 Order Payment Received — #${orderId.slice(0, 8)}`,
+    html: `
+      <div style="font-family:'Segoe UI',sans-serif;max-width:580px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:12px;overflow:hidden;">
+        <div style="background:#f0fdf4;padding:24px;border-bottom:1px solid #bbf7d0;">
+          <h1 style="color:#166534;margin:0;font-size:20px;">Payment Received</h1>
+          <p style="color:#15803d;font-size:14px;margin:4px 0 0;">Order #${orderId.slice(0, 8)} for ${businessName} has been paid.</p>
+        </div>
+        <div style="padding:24px;">
+          <p style="margin:4px 0;font-size:14px;"><strong>Customer:</strong> ${customerName}</p>
+          ${customerPhone ? `<p style="margin:4px 0;font-size:14px;"><strong>Phone:</strong> ${customerPhone}</p>` : ''}
+          <p style="margin:12px 0 4px;font-size:14px;"><strong>Items:</strong> ${items}</p>
+          <p style="margin:4px 0;font-size:15px;"><strong>Amount Paid: £${total.toFixed(2)}</strong></p>
+          <p style="margin:16px 0 0;font-size:13px;color:#6b5e8a;">This order is now confirmed and payment has been collected. Please prepare it accordingly.</p>
+        </div>
+      </div>
+    `,
+  });
+};
+
+// ─── Reservation Deposit Confirmation (to guest) ─────────────────────────────
+export const sendReservationDepositConfirmation = async (
+  to: string,
+  guestName: string,
+  businessName: string,
+  dateTime: Date,
+  guests: number,
+  depositAmount: number,
+  reservationId: string,
+) => {
+  const formattedDate = dateTime.toLocaleDateString('en-GB', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+  return resend.emails.send({
+    from,
+    to: [to],
+    subject: `Reservation confirmed — ${businessName} on ${dateTime.toLocaleDateString('en-GB')}`,
+    html: `
+      <div style="font-family:'Segoe UI',sans-serif;max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:16px;overflow:hidden;">
+        <div style="background:#f0fdf4;padding:32px 36px;border-bottom:1px solid #bbf7d0;">
+          <h1 style="color:#166534;margin:0;font-size:20px;font-weight:700;">Reservation Confirmed ✓</h1>
+          <p style="color:#15803d;font-size:14px;margin:6px 0 0;">Your deposit has been received, ${guestName}. We look forward to seeing you!</p>
+        </div>
+        <div style="padding:32px 36px;">
+          <div style="background:#f8f6ff;border:1.5px solid #ece5ff;border-radius:12px;padding:20px 24px;margin-bottom:20px;">
+            <div style="margin-bottom:10px;display:flex;justify-content:space-between;">
+              <span style="font-size:13px;color:#6b5e8a;">Booking Ref</span>
+              <strong style="font-size:13px;color:#130d2e;">#${reservationId.slice(0, 8)}</strong>
+            </div>
+            <div style="margin-bottom:10px;display:flex;justify-content:space-between;border-top:1px solid #ece5ff;padding-top:10px;">
+              <span style="font-size:13px;color:#6b5e8a;">Restaurant</span>
+              <span style="font-size:13px;color:#130d2e;">${businessName}</span>
+            </div>
+            <div style="margin-bottom:10px;display:flex;justify-content:space-between;border-top:1px solid #ece5ff;padding-top:10px;">
+              <span style="font-size:13px;color:#6b5e8a;">Date & Time</span>
+              <span style="font-size:13px;color:#130d2e;text-align:right;">${formattedDate}</span>
+            </div>
+            <div style="margin-bottom:10px;display:flex;justify-content:space-between;border-top:1px solid #ece5ff;padding-top:10px;">
+              <span style="font-size:13px;color:#6b5e8a;">Party Size</span>
+              <span style="font-size:13px;color:#130d2e;">${guests} guest${guests > 1 ? 's' : ''}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;border-top:1px solid #ece5ff;padding-top:10px;">
+              <strong style="font-size:14px;color:#130d2e;">Deposit Paid</strong>
+              <strong style="font-size:14px;color:#22c55e;">£${depositAmount.toFixed(2)} ✓</strong>
+            </div>
+          </div>
+          <p style="color:#9e92ba;font-size:13px;margin:0;line-height:1.6;">To modify or cancel your reservation, please contact ${businessName} directly or call us.</p>
+        </div>
+      </div>
+    `,
+  });
+};
+
+// ─── Business: Reservation Deposit Received ──────────────────────────────────
+export const sendBusinessDepositReceived = async (
+  to: string,
+  businessName: string,
+  reservationId: string,
+  guestName: string,
+  guestPhone: string | null,
+  guests: number,
+  dateTime: Date,
+  depositAmount: number,
+) => {
+  const formattedDate = dateTime.toLocaleDateString('en-GB', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+  return resend.emails.send({
+    from,
+    to: [to],
+    subject: `💳 Deposit Received — ${guestName} (${formattedDate})`,
+    html: `
+      <div style="font-family:'Segoe UI',sans-serif;max-width:580px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:12px;overflow:hidden;">
+        <div style="background:#f0fdf4;padding:24px;border-bottom:1px solid #bbf7d0;">
+          <h1 style="color:#166534;margin:0;font-size:20px;">Reservation Deposit Received</h1>
+          <p style="color:#15803d;font-size:14px;margin:4px 0 0;">Booking #${reservationId.slice(0, 8)} deposit has been paid for ${businessName}.</p>
+        </div>
+        <div style="padding:24px;">
+          <p style="margin:4px 0;font-size:14px;"><strong>Guest:</strong> ${guestName}</p>
+          ${guestPhone ? `<p style="margin:4px 0;font-size:14px;"><strong>Phone:</strong> ${guestPhone}</p>` : ''}
+          <p style="margin:4px 0;font-size:14px;"><strong>Date & Time:</strong> ${formattedDate}</p>
+          <p style="margin:4px 0;font-size:14px;"><strong>Party Size:</strong> ${guests} guest${guests > 1 ? 's' : ''}</p>
+          <p style="margin:12px 0 4px;font-size:15px;"><strong>Deposit Paid: £${depositAmount.toFixed(2)}</strong></p>
+          <p style="margin:16px 0 0;font-size:13px;color:#6b5e8a;">The reservation is now confirmed. It has been sent to your reservation system.</p>
+        </div>
+      </div>
+    `,
+  });
+};
+
+// ─── Reservation Cancellation (to guest) ─────────────────────────────────────
+export const sendReservationCancellationToGuest = async (
+  to: string,
+  guestName: string,
+  businessName: string,
+  dateTime: Date,
+  reservationId: string,
+) => {
+  const formattedDate = dateTime.toLocaleDateString('en-GB', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+  return resend.emails.send({
+    from,
+    to: [to],
+    subject: `Reservation cancelled — ${businessName} on ${dateTime.toLocaleDateString('en-GB')}`,
+    html: `
+      <div style="font-family:'Segoe UI',sans-serif;max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:16px;overflow:hidden;">
+        <div style="background:#fef2f2;padding:32px 36px;border-bottom:1px solid #fecaca;">
+          <h1 style="color:#991b1b;margin:0;font-size:20px;font-weight:700;">Reservation Cancelled</h1>
+          <p style="color:#b91c1c;font-size:14px;margin:6px 0 0;">Your reservation at ${businessName} has been cancelled.</p>
+        </div>
+        <div style="padding:32px 36px;">
+          <div style="background:#f8f6ff;border:1.5px solid #ece5ff;border-radius:12px;padding:20px 24px;margin-bottom:20px;">
+            <div style="margin-bottom:10px;display:flex;justify-content:space-between;">
+              <span style="font-size:13px;color:#6b5e8a;">Booking Ref</span>
+              <strong style="font-size:13px;color:#130d2e;">#${reservationId.slice(0, 8)}</strong>
+            </div>
+            <div style="margin-bottom:10px;display:flex;justify-content:space-between;border-top:1px solid #ece5ff;padding-top:10px;">
+              <span style="font-size:13px;color:#6b5e8a;">Restaurant</span>
+              <span style="font-size:13px;color:#130d2e;">${businessName}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;border-top:1px solid #ece5ff;padding-top:10px;">
+              <span style="font-size:13px;color:#6b5e8a;">Original Date</span>
+              <span style="font-size:13px;color:#130d2e;text-align:right;">${formattedDate}</span>
+            </div>
+          </div>
+          <p style="color:#9e92ba;font-size:13px;margin:0;line-height:1.6;">If a deposit was paid and you believe you are entitled to a refund, please contact ${businessName} directly.</p>
+        </div>
+      </div>
+    `,
+  });
+};
+
+// ─── Business: Reservation Cancelled ─────────────────────────────────────────
+export const sendBusinessReservationCancelled = async (
+  to: string,
+  businessName: string,
+  reservationId: string,
+  guestName: string,
+  guestPhone: string | null,
+  dateTime: Date,
+) => {
+  const formattedDate = dateTime.toLocaleDateString('en-GB', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+  return resend.emails.send({
+    from,
+    to: [to],
+    subject: `❌ Reservation Cancelled — ${guestName} (${dateTime.toLocaleDateString('en-GB')})`,
+    html: `
+      <div style="font-family:'Segoe UI',sans-serif;max-width:580px;margin:0 auto;background:#ffffff;border:1px solid #ebe6f5;border-radius:12px;overflow:hidden;">
+        <div style="background:#fef2f2;padding:24px;border-bottom:1px solid #fecaca;">
+          <h1 style="color:#991b1b;margin:0;font-size:20px;">Reservation Cancelled</h1>
+          <p style="color:#b91c1c;font-size:14px;margin:4px 0 0;">Booking #${reservationId.slice(0, 8)} for ${businessName} has been cancelled by the guest.</p>
+        </div>
+        <div style="padding:24px;">
+          <p style="margin:4px 0;font-size:14px;"><strong>Guest:</strong> ${guestName}</p>
+          ${guestPhone ? `<p style="margin:4px 0;font-size:14px;"><strong>Phone:</strong> ${guestPhone}</p>` : ''}
+          <p style="margin:4px 0;font-size:14px;"><strong>Original Date:</strong> ${formattedDate}</p>
+          <p style="margin:16px 0 0;font-size:13px;color:#6b5e8a;">Review your dashboard to check deposit status and decide on any applicable refund.</p>
+        </div>
+      </div>
+    `,
+  });
+};
+
 // ─── Account Reinstated ───────────────────────────────────────────────────────
 export const sendAccountReinstatedEmail = async (to: string, businessName: string) => {
   return resend.emails.send({

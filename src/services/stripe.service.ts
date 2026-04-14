@@ -81,3 +81,44 @@ export const createPaymentIntent = async (amount: number, currency: string, meta
   });
 };
 
+// ─── Get default payment method details for a customer ───────────────────────
+
+export const getDefaultPaymentMethod = async (customerId: string) => {
+  const customer = await stripe.customers.retrieve(customerId) as any;
+  const pmId = customer.invoice_settings?.default_payment_method;
+  if (!pmId) return null;
+  const pm = await stripe.paymentMethods.retrieve(pmId as string);
+  return { brand: pm.card?.brand ?? null, last4: pm.card?.last4 ?? null };
+};
+
+// ─── Get payment method card details ─────────────────────────────────────────
+
+export const getPaymentMethodDetails = async (paymentMethodId: string) => {
+  const pm = await stripe.paymentMethods.retrieve(paymentMethodId);
+  return { brand: pm.card?.brand ?? null, last4: pm.card?.last4 ?? null };
+};
+
+// ─── Create test payment method (test mode only) ─────────────────────────────
+// Creates a Stripe test PaymentMethod using the Visa 4242 test card token,
+// attaches it to the given customer, and sets it as the default.
+
+export const createTestPaymentMethod = async (customerId: string) => {
+  // Create PaymentMethod from Stripe's built-in test Visa token
+  const pm = await stripe.paymentMethods.create({
+    type: 'card',
+    card: { token: 'tok_visa' } as any, // tok_visa creates •••• 4242 Visa test card
+  });
+
+  // Attach to customer and set as default
+  await stripe.paymentMethods.attach(pm.id, { customer: customerId });
+  await stripe.customers.update(customerId, {
+    invoice_settings: { default_payment_method: pm.id },
+  });
+
+  return {
+    paymentMethodId: pm.id,
+    brand: pm.card?.brand ?? 'visa',
+    last4: pm.card?.last4 ?? '4242',
+  };
+};
+
