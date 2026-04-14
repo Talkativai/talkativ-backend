@@ -21,7 +21,7 @@ export const makeDemoCall = async (
     const call = await client.calls.create({
       to: toNumber,
       from,
-      url: `https://api.elevenlabs.io/v1/convai/twilio/inbound_call?agent_id=${id}`,
+      url: `https://api.elevenlabs.io/twilio/inbound_call`,
       method: 'POST',
     });
 
@@ -114,8 +114,10 @@ export const connectNumberToAgent = async (
       return false;
     }
 
+    // ElevenLabs routes inbound calls based on the registered phone number.
+    // Use their inbound_call endpoint — ElevenLabs will look up the assigned agent.
     await client.incomingPhoneNumbers(numbers[0].sid).update({
-      voiceUrl: `https://api.elevenlabs.io/v1/convai/twilio/inbound_call?agent_id=${agentId}`,
+      voiceUrl: `https://api.elevenlabs.io/twilio/inbound_call`,
       voiceMethod: 'POST',
     });
 
