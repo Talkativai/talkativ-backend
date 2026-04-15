@@ -205,7 +205,7 @@ export const getPortal = asyncHandler(async (req: Request, res: Response) => {
   const subscription = await prisma.subscription.findUnique({ where: { businessId } });
   if (!subscription?.stripeCustomerId) throw ApiError.badRequest('No Stripe customer');
 
-  const session = await stripeService.createPortalSession(subscription.stripeCustomerId, `${env.FRONTEND_URL}/billing`);
+  const session = await stripeService.createPortalSession(subscription.stripeCustomerId, `${env.FRONTEND_URL}/#/dashboard/billing`);
   res.json({ url: session.url });
 });
 
