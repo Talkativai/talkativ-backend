@@ -37,7 +37,16 @@ app.use('/webhooks/stripe', express.raw({ type: 'application/json' }));
 
 // ─── Global Middleware ───────────────────────────────────────────────────────
 app.use(helmet());
-app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
+const allowedOrigins = new Set([
+  env.FRONTEND_URL,
+  'https://talkativ-frontend-2.onrender.com',
+  'http://localhost:5173',
+  'http://localhost:3000',
+]);
+app.use(cors({
+  origin: (origin, cb) => cb(null, !origin || allowedOrigins.has(origin)),
+  credentials: true,
+}));
 app.use(morgan('dev'));
 app.use(cookieParser());
 // Limit body payload to 10kb to prevent denial of service by large payloads
@@ -146,7 +155,15 @@ app.post('/api/public/demo-call', demoCallLimiter, async (req, res) => {
 app.get('/api/public/order/:id', async (req, res) => {
   const order = await prisma.order.findUnique({
     where: { id: req.params.id },
-    include: { business: { select: { name: true, email: true } } },
+    include: {
+      business: {
+        select: {
+          name: true,
+          phone: true,
+          orderingPolicy: { select: { deliveryFee: true } },
+        },
+      },
+    },
   });
   if (!order) { res.status(404).json({ error: 'Not found' }); return; }
   res.json(order);
@@ -155,7 +172,15 @@ app.get('/api/public/order/:id', async (req, res) => {
 app.get('/api/public/reservation/:id', async (req, res) => {
   const reservation = await prisma.reservation.findUnique({
     where: { id: req.params.id },
-    include: { business: { select: { name: true } } },
+    include: {
+      business: {
+        select: {
+          name: true,
+          phone: true,
+          reservationPolicy: { select: { depositType: true, depositAmount: true } },
+        },
+      },
+    },
   });
   if (!reservation) { res.status(404).json({ error: 'Not found' }); return; }
   res.json(reservation);
