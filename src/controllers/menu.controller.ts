@@ -48,6 +48,10 @@ export const getCategories = asyncHandler(async (req: Request, res: Response) =>
 });
 
 export const getCategoryItems = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
+  const category = await prisma.menuCategory.findFirst({ where: { id: req.params.id, businessId } });
+  if (!category) throw ApiError.notFound('Category not found');
   const items = await prisma.menuItem.findMany({
     where: { categoryId: req.params.id },
     orderBy: { name: 'asc' },
@@ -69,15 +73,21 @@ export const createCategory = asyncHandler(async (req: Request, res: Response) =
 
 export const updateCategory = asyncHandler(async (req: Request, res: Response) => {
   const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
+  const existing = await prisma.menuCategory.findFirst({ where: { id: req.params.id, businessId } });
+  if (!existing) throw ApiError.notFound('Category not found');
   const category = await prisma.menuCategory.update({ where: { id: req.params.id }, data: req.body });
-  if (businessId) autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
+  autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
   res.json(category);
 });
 
 export const deleteCategory = asyncHandler(async (req: Request, res: Response) => {
   const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
+  const existing = await prisma.menuCategory.findFirst({ where: { id: req.params.id, businessId } });
+  if (!existing) throw ApiError.notFound('Category not found');
   await prisma.menuCategory.delete({ where: { id: req.params.id } });
-  if (businessId) autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
+  autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
   res.json({ message: 'Category deleted' });
 });
 
@@ -94,15 +104,21 @@ export const createItem = asyncHandler(async (req: Request, res: Response) => {
 
 export const updateItem = asyncHandler(async (req: Request, res: Response) => {
   const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
+  const existing = await prisma.menuItem.findFirst({ where: { id: req.params.id, category: { businessId } } });
+  if (!existing) throw ApiError.notFound('Item not found');
   const item = await prisma.menuItem.update({ where: { id: req.params.id }, data: req.body });
-  if (businessId) autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
+  autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
   res.json(item);
 });
 
 export const deleteItem = asyncHandler(async (req: Request, res: Response) => {
   const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
+  const existing = await prisma.menuItem.findFirst({ where: { id: req.params.id, category: { businessId } } });
+  if (!existing) throw ApiError.notFound('Item not found');
   await prisma.menuItem.delete({ where: { id: req.params.id } });
-  if (businessId) autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
+  autoSyncAgent(businessId).catch(err => console.error('[AutoSync] failed:', err.message));
   res.json({ message: 'Item deleted' });
 });
 

@@ -9,11 +9,160 @@ import * as emailService from '../services/email.service.js';
 import * as twilioService from '../services/twilio.service.js';
 import * as posService from '../services/pos.service.js';
 import * as resosService from '../services/resos.service.js';
+import * as paymentProviders from '../services/payment-providers.service.js';
+
+// ─── Helper: push reservation to whichever platform is connected ─────────────
+
+async function pushReservationToIntegration(
+  integration: any,
+  reservationId: string,
+  data: { guestName: string; guestPhone: string | null; guests: number; dateTime: string; notes: string | null },
+) {
+  const cfg = integration.config as any;
+
+  if (integration.name === 'resOS' && cfg?.apiKey && cfg?.propertyId) {
+    const result = await resosService.createResOSReservation(cfg.apiKey, cfg.propertyId, data);
+    if (result.success && result.reservationId) {
+      await prisma.reservation.update({ where: { id: reservationId }, data: { externalId: result.reservationId } });
+      console.log(`[resOS] Reservation pushed — ID: ${result.reservationId}`);
+    } else {
+      console.error('[resOS] Push failed:', result.message);
+    }
+    return;
+  }
+
+  if (integration.name === 'ResDiary' && cfg?.apiKey && cfg?.restaurantId) {
+    try {
+      const res = await fetch(`https://api.resdiary.com/api/v1/restaurant/${encodeURIComponent(cfg.restaurantId)}/reservations`, {
+        method: 'POST',
+        headers: { 'Authorization': `ApiKey ${cfg.apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          firstName: data.guestName.split(' ')[0] || data.guestName,
+          lastName: data.guestName.split(' ').slice(1).join(' ') || '',
+          phone: data.guestPhone || '',
+          covers: data.guests,
+          visitDateTime: data.dateTime,
+          notes: data.notes || '',
+        }),
+      });
+      if (res.ok) {
+        const body = await res.json() as any;
+        if (body?.id) {
+          await prisma.reservation.update({ where: { id: reservationId }, data: { externalId: String(body.id) } });
+        }
+        console.log('[ResDiary] Reservation pushed');
+      } else {
+        console.error('[ResDiary] Push failed:', res.status, await res.text());
+      }
+    } catch (err) {
+      console.error('[ResDiary] Push error:', err);
+    }
+    return;
+  }
+
+  // OpenTable and Collins: credentials stored, push not yet implemented (requires partner approval)
+  console.log(`[${integration.name}] Reservation stored locally — direct push not yet available.`);
+}
+
+// ─── Public: POS payment return (Square / SumUp redirect after payment) ──────
+// Square and SumUp redirect the customer's browser here after payment. We verify
+// the payment with the provider API before marking the order/reservation confirmed.
+
+export const posPaymentReturn = asyncHandler(async (req: Request, res: Response) => {
+  const { order_id, reservation_id, provider } = req.query as Record<string, string>;
+  const id = order_id || reservation_id;
+  const type = order_id ? 'order' : 'reservation';
+
+  if (!id || !provider) {
+    return res.redirect(`${env.FRONTEND_URL}/#/payment-error`);
+  }
+
+  // Find the business and its integration config for the provider
+  let business: any;
+  let record: any;
+
+  if (type === 'order') {
+    record = await prisma.order.findUnique({
+      where: { id },
+      include: { business: { include: { integrations: true } } },
+    });
+    business = record?.business;
+  } else {
+    record = await prisma.reservation.findUnique({
+      where: { id },
+      include: { business: { include: { integrations: true } } },
+    });
+    business = record?.business;
+  }
+
+  if (!record || !business) {
+    return res.redirect(`${env.FRONTEND_URL}/#/payment-error`);
+  }
+
+  const integration = business.integrations?.find(
+    (i: any) => i.name === provider && i.status === 'CONNECTED',
+  );
+  if (!integration) {
+    return res.redirect(`${env.FRONTEND_URL}/#/payment-error`);
+  }
+
+  const cfg = integration.config as any;
+  let paid = false;
+
+  if (provider === 'square') {
+    paid = await paymentProviders.verifySquarePayment(cfg, id);
+  } else if (provider === 'sumup') {
+    paid = await paymentProviders.verifySumUpPayment(cfg, id);
+  }
+
+  if (!paid) {
+    // Payment not yet confirmed — redirect to a pending page; customer may need to wait
+    return res.redirect(`${env.FRONTEND_URL}/#/payment-pending?id=${id}&type=${type}`);
+  }
+
+  if (type === 'order') {
+    await prisma.order.update({ where: { id }, data: { paymentStatus: 'paid', status: 'CONFIRMED' } });
+
+    if (record.customerPhone && twilioService.isValidPhoneNumber(record.customerPhone)) {
+      twilioService.sendSms(
+        record.customerPhone,
+        `Hi ${record.customerName}, your payment to ${business.name} is confirmed! Order #${id.slice(0, 8)} is being prepared.`,
+      ).catch(() => {});
+    }
+    return res.redirect(`${env.FRONTEND_URL}/#/payment-success?order_id=${id}`);
+  } else {
+    await prisma.reservation.update({ where: { id }, data: { depositPaid: true, status: 'CONFIRMED' } });
+
+    const resIntegration = business.integrations?.find(
+      (i: any) => ['resOS', 'ResDiary', 'OpenTable', 'Collins'].includes(i.name) && i.status === 'CONNECTED',
+    );
+    if (resIntegration) {
+      pushReservationToIntegration(resIntegration, id, {
+        guestName: record.guestName,
+        guestPhone: record.guestPhone,
+        guests: record.guests,
+        dateTime: record.dateTime.toISOString(),
+        notes: 'Deposit paid via POS',
+      }).catch(() => {});
+    }
+
+    if (record.guestPhone && twilioService.isValidPhoneNumber(record.guestPhone)) {
+      const formattedDate = record.dateTime.toLocaleDateString('en-GB', {
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
+      });
+      twilioService.sendSms(
+        record.guestPhone,
+        `Hi ${record.guestName}, your deposit for ${business.name} on ${formattedDate} is confirmed! Booking ref: #${id.slice(0, 8)}`,
+      ).catch(() => {});
+    }
+    return res.redirect(`${env.FRONTEND_URL}/#/payment-success?reservation_id=${id}`);
+  }
+});
 
 // ─── ElevenLabs Webhook ──────────────────────────────────────────────────────
 export const elevenlabsWebhook = asyncHandler(async (req: Request, res: Response) => {
-  // Verify webhook secret
-  const secret = req.headers['x-webhook-secret'] || req.headers['authorization'];
+  // Verify webhook secret — only accept the dedicated x-webhook-secret header
+  const secret = req.headers['x-webhook-secret'];
   if (secret !== env.AGENT_WEBHOOK_SECRET) {
     throw ApiError.unauthorized('Invalid webhook secret');
   }
@@ -122,7 +271,7 @@ export const stripeWebhook = asyncHandler(async (req: Request, res: Response) =>
         const amountPaid = paymentIntent.amount / 100;
 
         // ── Send customer payment confirmation ────────────────────────────────
-        if (order.customerPhone) {
+        if (order.customerPhone && twilioService.isValidPhoneNumber(order.customerPhone)) {
           // SMS confirmation
           twilioService.sendSms(
             order.customerPhone,
@@ -165,35 +314,25 @@ export const stripeWebhook = asyncHandler(async (req: Request, res: Response) =>
 
         const depositPaid = paymentIntent.amount / 100;
 
-        // ── Push to resOS now that deposit is confirmed ───────────────────────
-        const resosIntegration = reservation.business.integrations?.find(
-          (i: any) => i.name === 'resOS' && i.status === 'CONNECTED',
+        // ── Push to reservation platform now that deposit is confirmed ────────
+        const resIntegration = reservation.business.integrations?.find(
+          (i: any) => ['resOS', 'ResDiary', 'OpenTable', 'Collins'].includes(i.name) && i.status === 'CONNECTED',
         );
-        if (resosIntegration) {
-          const cfg = resosIntegration.config as any;
-          if (cfg?.apiKey && cfg?.propertyId) {
-            resosService.createResOSReservation(cfg.apiKey, cfg.propertyId, {
-              guestName: reservation.guestName,
-              guestPhone: reservation.guestPhone,
-              guests: reservation.guests,
-              dateTime: reservation.dateTime.toISOString(),
-              notes: `Deposit of £${depositPaid.toFixed(2)} paid via Talkativ`,
-            }).then(async (result) => {
-              if (result.success && result.reservationId) {
-                await prisma.reservation.update({
-                  where: { id: reservation.id },
-                  data: { externalId: result.reservationId },
-                });
-              }
-            }).catch(err => console.error('[resOS] Post-deposit push failed:', err));
-          }
+        if (resIntegration) {
+          pushReservationToIntegration(resIntegration, reservation.id, {
+            guestName: reservation.guestName,
+            guestPhone: reservation.guestPhone,
+            guests: reservation.guests,
+            dateTime: reservation.dateTime.toISOString(),
+            notes: `Deposit of £${depositPaid.toFixed(2)} paid via Talkativ`,
+          }).catch(err => console.error('[Reservation] Post-deposit push failed:', err));
         }
 
         // ── SMS confirmation to guest ─────────────────────────────────────────
         const formattedDate = reservation.dateTime.toLocaleDateString('en-GB', {
           weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
         });
-        if (reservation.guestPhone) {
+        if (reservation.guestPhone && twilioService.isValidPhoneNumber(reservation.guestPhone)) {
           twilioService.sendSms(
             reservation.guestPhone,
             `Hi ${reservation.guestName}, your deposit of £${depositPaid.toFixed(2)} for ${reservation.business.name} on ${formattedDate} is confirmed! Booking ref: #${reservation.id.slice(0, 8)}`,
@@ -393,9 +532,15 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
   // Check business hours before accepting order
   const business = await prisma.business.findUnique({
     where: { id: business_id },
-    include: { orderingPolicy: true, integrations: true, notifSettings: true },
+    include: { orderingPolicy: true, integrations: true, notifSettings: true, subscription: true },
   });
   if (!business) {
+    res.json({ error: true, message: "I'm sorry, our ordering service isn't available right now. Kindly try again later." });
+    return;
+  }
+
+  // Block if subscription is cancelled
+  if ((business as any).subscription?.status === 'CANCELLED') {
     res.json({ error: true, message: "I'm sorry, our ordering service isn't available right now. Kindly try again later." });
     return;
   }
@@ -434,15 +579,30 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
     const currentDay = dayNames[now.getDay()];
     const hours = business.openingHours as Record<string, any>;
     const todayHours = hours[currentDay];
+    const hoursStr = Object.entries(hours)
+      .filter(([_, v]: [string, any]) => !v.closed)
+      .map(([day, v]: [string, any]) => `${day}: ${v.open} - ${v.close}`)
+      .join(', ');
 
-    if (todayHours && todayHours.closed) {
-      const hoursStr = Object.entries(hours)
-        .filter(([_, v]: [string, any]) => !v.closed)
-        .map(([day, v]: [string, any]) => `${day}: ${v.open} - ${v.close}`)
-        .join(', ');
+    let isClosed = false;
+    if (!todayHours || todayHours.closed) {
+      isClosed = true;
+    } else if (todayHours.open && todayHours.close) {
+      // Parse "HH:MM" times and compare against current local time
+      const [openH, openM] = todayHours.open.split(':').map(Number);
+      const [closeH, closeM] = todayHours.close.split(':').map(Number);
+      const nowMinutes = now.getHours() * 60 + now.getMinutes();
+      const openMinutes = openH * 60 + openM;
+      const closeMinutes = closeH * 60 + closeM;
+      if (nowMinutes < openMinutes || nowMinutes >= closeMinutes) {
+        isClosed = true;
+      }
+    }
+
+    if (isClosed) {
       res.json({
         error: true,
-        message: `Sorry, we're currently closed. Our opening hours are: ${hoursStr}. Please call back during business hours to place an order!`,
+        message: `Sorry, we're currently closed. Our opening hours are: ${hoursStr || 'not set'}. Please call back during business hours to place an order!`,
       });
       return;
     }
@@ -453,7 +613,9 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
   if (typeof items === 'string') {
     // Try to parse from menu
     const itemNames = items.split(',').map((i: string) => i.trim());
-    for (const itemName of itemNames) {
+    for (const rawName of itemNames) {
+      // Strip leading quantity prefix like "2x " or "2 x " before looking up the item
+      const itemName = rawName.replace(/^\d+\s*[xX]\s*/, '').trim();
       const menuItem = await prisma.menuItem.findFirst({
         where: {
           category: { businessId: business_id },
@@ -461,7 +623,12 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
           status: 'ACTIVE',
         },
       });
-      if (menuItem) totalAmount += Number(menuItem.price);
+      if (menuItem) {
+        // Parse quantity from prefix (e.g. "2x Edikaikong" → qty 2), default 1
+        const qtyMatch = rawName.match(/^(\d+)\s*[xX]\s*/);
+        const qty = qtyMatch ? parseInt(qtyMatch[1], 10) : 1;
+        totalAmount += Number(menuItem.price) * qty;
+      }
     }
   }
 
@@ -543,32 +710,50 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
-  let paymentLink = null;
+  let paymentLink: string | null = null;
 
-  // If customer chooses "pay now", create a Stripe payment intent and send link via SMS
+  // ── Payment routing: Square → SumUp → Stripe Connect → nothing ────────────
+  // Money always goes directly to the business — we are never the payment intermediary.
   if (payment_method === 'pay_now' && totalAmount > 0 && customer_phone) {
     try {
-      const paymentIntent = await stripeService.createPaymentIntent(
-        Math.round(totalAmount * 100),
-        'gbp',
-        { type: 'order_payment', order_id: order.id, business_id, customer_name }
-      );
+      const businessCurrency = ((business as any).currency || 'GBP').toUpperCase();
+      const squareInt  = business.integrations?.find((i: any) => i.name === 'Square'  && i.status === 'CONNECTED');
+      const sumupInt   = business.integrations?.find((i: any) => i.name === 'SumUp'   && i.status === 'CONNECTED');
+      const stripeInt  = business.integrations?.find((i: any) => i.name === 'Stripe'  && i.status === 'CONNECTED');
 
-      await prisma.order.update({
-        where: { id: order.id },
-        data: { paymentIntentId: paymentIntent.id },
-      });
+      if (squareInt) {
+        const cfg = squareInt.config as any;
+        paymentLink = await paymentProviders.createSquarePaymentLink(
+          cfg, order.id, items, totalAmount, businessCurrency,
+        );
+      } else if (sumupInt) {
+        const cfg = sumupInt.config as any;
+        paymentLink = await paymentProviders.createSumUpCheckout(
+          cfg, order.id, items, totalAmount, businessCurrency,
+        );
+      } else if (stripeInt) {
+        // Stripe Connect destination charge — 0.5% platform fee taken automatically
+        const cfg = stripeInt.config as any;
+        const paymentIntent = await stripeService.createPaymentIntentWithConnect(
+          Math.round(totalAmount * 100),
+          businessCurrency.toLowerCase(),
+          { type: 'order_payment', order_id: order.id, business_id, customer_name },
+          cfg.accountId,
+        );
+        await prisma.order.update({ where: { id: order.id }, data: { paymentIntentId: paymentIntent.id } });
+        paymentLink = `${env.FRONTEND_URL}/#/pay?pi=${paymentIntent.client_secret}&order_id=${order.id}&type=order`;
+      }
+      // If no payment integration is connected, pay_now silently falls through —
+      // the agent should only offer pay_now when a payment integration is available.
 
-      paymentLink = paymentIntent.client_secret;
-
-      // Send payment link via SMS
-      const link = `${env.FRONTEND_URL}/pay?pi=${paymentIntent.client_secret}&order_id=${order.id}&type=order`;
-      const smsBody = `Hi ${customer_name}, your order at ${business.name} is confirmed!\n\nTotal: £${totalAmount.toFixed(2)}\nItems: ${items}\n\nPay here: ${link}`;
-      twilioService.sendSms(customer_phone, smsBody).catch(err => console.error('[SMS] Failed to send payment link:', err));
-    } catch (stripeErr) {
-      console.error('Failed to create payment intent:', stripeErr);
+      if (paymentLink && customer_phone && twilioService.isValidPhoneNumber(customer_phone)) {
+        const smsBody = `Hi ${customer_name}, your order at ${business.name} is confirmed!\n\nTotal: £${totalAmount.toFixed(2)}\nItems: ${items}\n\nPay here: ${paymentLink}`;
+        twilioService.sendSms(customer_phone, smsBody).catch(err => console.error('[SMS] Failed to send payment link:', err));
+      }
+    } catch (payErr) {
+      console.error('[Payment] Failed to create payment link:', payErr);
     }
-  } else if (customer_phone) {
+  } else if (customer_phone && twilioService.isValidPhoneNumber(customer_phone)) {
     // Send order confirmation SMS for pay on delivery/collection
     const smsBody = `Hi ${customer_name}, your order at ${business.name} is confirmed!\n\nItems: ${items}${deliveryFee > 0 ? `\nDelivery fee: £${deliveryFee.toFixed(2)}` : ''}\nTotal: £${totalAmount.toFixed(2)}\nPayment: on ${orderType === 'DELIVERY' ? 'delivery' : 'collection'}${allergies ? `\n\n⚠️ Allergies noted: ${allergies}` : ''}`;
     twilioService.sendSms(customer_phone, smsBody).catch(err => console.error('[SMS] Failed to send order confirmation:', err));
@@ -603,7 +788,7 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
     confirmation: `Order created successfully!${allergyWarning}`,
     allergies: allergies || null,
     payment_method: payment_method || 'pay_on_delivery',
-    payment_link: paymentLink ? `${env.FRONTEND_URL}/pay?pi=${paymentLink}&order_id=${order.id}&type=order` : null,
+    payment_link: paymentLink,
     total: totalAmount,
   });
 });
@@ -620,21 +805,24 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
   // Check business hours before accepting reservation
   const business = await prisma.business.findUnique({
     where: { id: business_id },
-    include: { reservationPolicy: true, integrations: true, notifSettings: true },
+    include: { reservationPolicy: true, integrations: true, notifSettings: true, subscription: true },
   });
   if (!business) {
     res.json({ error: true, message: "I'm sorry, our reservation service isn't available right now. Kindly try again later." });
     return;
   }
 
-  // Check if reservation integration (resOS) is connected
-  const reservationIntegration = business.integrations?.find(
-    (i: any) => i.name === 'resOS' && i.status === 'CONNECTED'
-  );
-  if (!reservationIntegration) {
-    res.json({ error: true, message: "I'm sorry, our reservation service isn't currently connected. Kindly try again later or contact us directly to book a table." });
+  // Block if subscription is cancelled
+  if ((business as any).subscription?.status === 'CANCELLED') {
+    res.json({ error: true, message: "I'm sorry, our reservation service isn't available right now. Kindly try again later." });
     return;
   }
+
+  // Find the first connected reservation integration (resOS, ResDiary, OpenTable, Collins)
+  const reservationIntegration = business.integrations?.find(
+    (i: any) => ['resOS', 'ResDiary', 'OpenTable', 'Collins'].includes(i.name) && i.status === 'CONNECTED'
+  );
+  // No block — reservations work without any integration. The integration is for syncing only.
 
   if (business.openingHours) {
     const reservationDate = new Date(date_time);
@@ -642,15 +830,29 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
     const reservationDay = dayNames[reservationDate.getDay()];
     const hours = business.openingHours as Record<string, any>;
     const dayHours = hours[reservationDay];
+    const hoursStr = Object.entries(hours)
+      .filter(([_, v]: [string, any]) => !v.closed)
+      .map(([day, v]: [string, any]) => `${day}: ${v.open} - ${v.close}`)
+      .join(', ');
 
-    if (dayHours && dayHours.closed) {
-      const hoursStr = Object.entries(hours)
-        .filter(([_, v]: [string, any]) => !v.closed)
-        .map(([day, v]: [string, any]) => `${day}: ${v.open} - ${v.close}`)
-        .join(', ');
+    let isUnavailable = false;
+    if (!dayHours || dayHours.closed) {
+      isUnavailable = true;
+    } else if (dayHours.open && dayHours.close) {
+      const [openH, openM] = dayHours.open.split(':').map(Number);
+      const [closeH, closeM] = dayHours.close.split(':').map(Number);
+      const reservationMinutes = reservationDate.getHours() * 60 + reservationDate.getMinutes();
+      const openMinutes = openH * 60 + openM;
+      const closeMinutes = closeH * 60 + closeM;
+      if (reservationMinutes < openMinutes || reservationMinutes >= closeMinutes) {
+        isUnavailable = true;
+      }
+    }
+
+    if (isUnavailable) {
       res.json({
         error: true,
-        message: `Sorry, we're closed on ${reservationDay}. Our opening hours are: ${hoursStr}. Would you like to book for a different day?`,
+        message: `Sorry, we're not available on ${reservationDay} at that time. Our opening hours are: ${hoursStr || 'not set'}. Would you like to book for a different day or time?`,
       });
       return;
     }
@@ -704,30 +906,44 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
   let paymentLink = null;
   const formattedDate = new Date(date_time).toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-  // If deposit is required, create payment intent and send link via SMS
+  // ── Deposit payment routing: Square → SumUp → Stripe Connect → nothing ──────
   if (depositRequired && actualDeposit > 0 && guest_phone) {
     try {
-      const paymentIntent = await stripeService.createPaymentIntent(
-        Math.round(actualDeposit * 100),
-        'gbp',
-        { type: 'reservation_deposit', reservation_id: reservation.id, business_id, guest_name }
-      );
+      const businessCurrency = ((business as any).currency || 'GBP').toUpperCase();
+      const squareInt = business.integrations?.find((i: any) => i.name === 'Square' && i.status === 'CONNECTED');
+      const sumupInt  = business.integrations?.find((i: any) => i.name === 'SumUp'  && i.status === 'CONNECTED');
+      const stripeInt = business.integrations?.find((i: any) => i.name === 'Stripe' && i.status === 'CONNECTED');
 
-      await prisma.reservation.update({
-        where: { id: reservation.id },
-        data: { depositPaymentIntentId: paymentIntent.id },
-      });
+      if (squareInt) {
+        const cfg = squareInt.config as any;
+        paymentLink = await paymentProviders.createSquarePaymentLink(
+          cfg, reservation.id, `Deposit for ${guests} guests at ${business.name}`, actualDeposit, businessCurrency,
+        );
+      } else if (sumupInt) {
+        const cfg = sumupInt.config as any;
+        paymentLink = await paymentProviders.createSumUpCheckout(
+          cfg, reservation.id, `Deposit for ${guests} guests at ${business.name}`, actualDeposit, businessCurrency,
+        );
+      } else if (stripeInt) {
+        const cfg = stripeInt.config as any;
+        const paymentIntent = await stripeService.createPaymentIntentWithConnect(
+          Math.round(actualDeposit * 100),
+          businessCurrency.toLowerCase(),
+          { type: 'reservation_deposit', reservation_id: reservation.id, business_id, guest_name },
+          cfg.accountId,
+        );
+        await prisma.reservation.update({ where: { id: reservation.id }, data: { depositPaymentIntentId: paymentIntent.id } });
+        paymentLink = `${env.FRONTEND_URL}/#/pay?pi=${paymentIntent.client_secret}&reservation_id=${reservation.id}&type=reservation`;
+      }
 
-      paymentLink = paymentIntent.client_secret;
-
-      // Send deposit payment link via SMS
-      const link = `${env.FRONTEND_URL}/pay?pi=${paymentIntent.client_secret}&reservation_id=${reservation.id}&type=reservation`;
-      const smsBody = `Hi ${guest_name}, your table for ${guests} at ${business.name} on ${formattedDate} is almost confirmed!\n\nA deposit of £${actualDeposit.toFixed(2)} is required. Pay here: ${link}`;
-      twilioService.sendSms(guest_phone, smsBody).catch(err => console.error('[SMS] Failed to send deposit link:', err));
-    } catch (stripeErr) {
-      console.error('Failed to create deposit payment intent:', stripeErr);
+      if (paymentLink && twilioService.isValidPhoneNumber(guest_phone)) {
+        const smsBody = `Hi ${guest_name}, your table for ${guests} at ${business.name} on ${formattedDate} is almost confirmed!\n\nA deposit of £${actualDeposit.toFixed(2)} is required. Pay here: ${paymentLink}`;
+        twilioService.sendSms(guest_phone, smsBody).catch(err => console.error('[SMS] Failed to send deposit link:', err));
+      }
+    } catch (payErr) {
+      console.error('[Payment] Failed to create deposit payment link:', payErr);
     }
-  } else if (guest_phone) {
+  } else if (guest_phone && twilioService.isValidPhoneNumber(guest_phone)) {
     // No deposit — send booking confirmation SMS
     const smsBody = `Hi ${guest_name}, your reservation for ${guests} guest${guests > 1 ? 's' : ''} at ${business.name} on ${formattedDate} is confirmed! See you then.`;
     twilioService.sendSms(guest_phone, smsBody).catch(err => console.error('[SMS] Failed to send reservation confirmation:', err));
@@ -742,36 +958,18 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
     }
   }
 
-  // ── Push to resOS if connected ────────────────────────────────────────────
-  // Only push immediately if no deposit is required.
-  // When deposit IS required, the push happens in the Stripe webhook AFTER payment.
+  // ── Push to reservation platform if connected ─────────────────────────────
+  // Deferred when a deposit is required — push happens after payment is confirmed.
   if (reservationIntegration && !(depositRequired && actualDeposit > 0)) {
-    const config = reservationIntegration.config as any;
-    if (config?.apiKey && config?.propertyId) {
-      const resosResult = await resosService.createResOSReservation(
-        config.apiKey,
-        config.propertyId,
-        {
-          guestName: guest_name,
-          guestPhone: guest_phone || null,
-          guests,
-          dateTime: date_time,
-          notes: depositMessage || null,
-        }
-      );
-
-      if (resosResult.success && resosResult.reservationId) {
-        await prisma.reservation.update({
-          where: { id: reservation.id },
-          data: { externalId: resosResult.reservationId },
-        });
-        console.log(`[resOS] Reservation pushed — resOS ID: ${resosResult.reservationId}`);
-      } else {
-        console.error('[resOS] Push failed but reservation saved locally:', resosResult.message);
-      }
-    }
+    await pushReservationToIntegration(reservationIntegration, reservation.id, {
+      guestName: guest_name,
+      guestPhone: guest_phone || null,
+      guests,
+      dateTime: date_time,
+      notes: depositMessage || null,
+    });
   } else if (depositRequired && actualDeposit > 0) {
-    console.log(`[resOS] Deposit required — deferring resOS push until deposit is paid.`);
+    console.log(`[Reservation] Deposit required — deferring platform push until deposit is paid.`);
   }
 
   // Send business notification email
@@ -791,7 +989,7 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
     confirmation: `Reservation created successfully!${depositMessage}`,
     deposit_required: depositRequired,
     deposit_amount: actualDeposit,
-    payment_link: paymentLink ? `${env.FRONTEND_URL}/pay?pi=${paymentLink}&reservation_id=${reservation.id}&type=reservation` : null,
+    payment_link: paymentLink,
   });
 });
 

@@ -71,13 +71,33 @@ export const createPortalSession = async (customerId: string, returnUrl: string)
   });
 };
 
-// ─── Payment Link (for deposits) ─────────────────────────────────────────────
+// ─── Payment Intent (direct — for non-Connect flows) ─────────────────────────
 
 export const createPaymentIntent = async (amount: number, currency: string, metadata: Record<string, string>) => {
   return stripe.paymentIntents.create({
     amount,
     currency,
     metadata,
+  });
+};
+
+// ─── Payment Intent via Stripe Connect (destination charge) ──────────────────
+// Money flows: customer → our platform → (minus applicationFeeAmount) → connected account
+// 0.5% platform fee is taken automatically. No change needed to the /pay frontend page.
+
+export const createPaymentIntentWithConnect = async (
+  amount: number,
+  currency: string,
+  metadata: Record<string, string>,
+  connectedAccountId: string,
+) => {
+  const applicationFeeAmount = Math.round(amount * 0.005); // 0.5%
+  return stripe.paymentIntents.create({
+    amount,
+    currency,
+    metadata,
+    application_fee_amount: applicationFeeAmount,
+    transfer_data: { destination: connectedAccountId },
   });
 };
 

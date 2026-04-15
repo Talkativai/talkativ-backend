@@ -64,7 +64,7 @@ export const createAgent = async (config: {
           customer_phone: { type: 'string', description: 'Phone number — required to send payment link or confirmation by SMS' },
           delivery_address: { type: 'string', description: 'Formatted, validated delivery address if type is DELIVERY' },
           items: { type: 'string', description: 'Comma separated list of ordered items exactly as listed in the menu' },
-          type: { type: 'string', enum: ['DELIVERY', 'COLLECTION', 'DINE_IN'] },
+          type: { type: 'string', enum: ['DELIVERY', 'COLLECTION'] },
           allergies: { type: 'string', description: 'Any food allergies or dietary requirements specifically stated by the caller' },
           payment_method: { type: 'string', enum: ['pay_now', 'pay_on_delivery', 'pay_on_collection'] },
           notes: { type: 'string', description: 'Special instructions or notes for the kitchen' },

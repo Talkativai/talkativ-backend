@@ -49,7 +49,8 @@ const getExistingNumber = async (): Promise<string | null> => {
 
 // ─── Buy a phone number based on country ─────────────────────────────────────
 // Uses TWILIO_BUNDLE_SID + TWILIO_ADDRESS_SID from env for countries that require them (e.g. GB).
-// Falls back to reusing an existing number on the account if purchase fails.
+// Returns null — without falling back to a different country — if no number is available.
+// The caller is responsible for showing a "no number available" message to the user.
 export const buyPhoneNumber = async (countryCode: string = 'GB'): Promise<string | null> => {
   const cc = countryCode.toUpperCase();
 
@@ -59,46 +60,49 @@ export const buyPhoneNumber = async (countryCode: string = 'GB'): Promise<string
       .list({ voiceEnabled: true, limit: 5 });
 
     if (!available.length) {
-      console.warn(`[Twilio] No local numbers available for: ${cc}`);
-    } else {
-      for (const num of available) {
-        try {
-          const params: Record<string, string> = { phoneNumber: num.phoneNumber };
+      console.warn(`[Twilio] No local numbers available for country: ${cc}`);
+      return null;
+    }
 
-          // Attach address if required by this number
-          if (num.addressRequirements && num.addressRequirements !== 'none') {
-            if (env.TWILIO_ADDRESS_SID) {
-              params.addressSid = env.TWILIO_ADDRESS_SID;
-            } else {
-              const addresses = await client.addresses.list({ isoCountry: cc, limit: 1 });
-              if (addresses.length) params.addressSid = addresses[0].sid;
-            }
+    for (const num of available) {
+      try {
+        const params: Record<string, string> = { phoneNumber: num.phoneNumber };
+
+        // Attach address if required by this number
+        if (num.addressRequirements && num.addressRequirements !== 'none') {
+          if (env.TWILIO_ADDRESS_SID) {
+            params.addressSid = env.TWILIO_ADDRESS_SID;
+          } else {
+            const addresses = await client.addresses.list({ isoCountry: cc, limit: 1 });
+            if (addresses.length) params.addressSid = addresses[0].sid;
           }
-
-          // Attach regulatory bundle if configured (required for GB, etc.)
-          if (env.TWILIO_BUNDLE_SID) {
-            params.bundleSid = env.TWILIO_BUNDLE_SID;
-          }
-
-          const purchased = await client.incomingPhoneNumbers.create(params as any);
-          console.log(`[Twilio] Provisioned ${purchased.phoneNumber} (${cc})`);
-          return purchased.phoneNumber;
-        } catch (innerErr: any) {
-          console.warn(`[Twilio] Buy failed for ${num.phoneNumber}:`, innerErr.message);
         }
+
+        // Attach regulatory bundle if configured (required for GB, etc.)
+        if (env.TWILIO_BUNDLE_SID) {
+          params.bundleSid = env.TWILIO_BUNDLE_SID;
+        }
+
+        const purchased = await client.incomingPhoneNumbers.create(params as any);
+        console.log(`[Twilio] Provisioned ${purchased.phoneNumber} (${cc})`);
+        return purchased.phoneNumber;
+      } catch (innerErr: any) {
+        console.warn(`[Twilio] Buy failed for ${num.phoneNumber}:`, innerErr.message);
       }
     }
+
+    // All purchase attempts for available numbers failed
+    console.error(`[Twilio] All purchase attempts failed for country: ${cc}`);
+    return null;
   } catch (e: any) {
     if (e.code === 21404) {
-      console.warn('[Twilio] Trial account — reusing existing number');
+      // Twilio trial account can't search numbers in this region — reuse the trial number (dev only)
+      console.warn('[Twilio] Trial account restriction — reusing existing number');
       return getExistingNumber();
     }
     console.error(`[Twilio] buyPhoneNumber(${cc}) failed:`, e.message);
+    return null;
   }
-
-  // Fallback: reuse an existing number already on this Twilio account
-  console.warn(`[Twilio] Could not buy new number in ${cc} — falling back to existing account number`);
-  return getExistingNumber();
 };
 
 // ─── Connect number to ElevenLabs agent ──────────────────────────────────────

@@ -9,7 +9,7 @@ export const listOrders = asyncHandler(async (req: Request, res: Response) => {
   const businessId = req.user!.businessId;
   if (!businessId) throw ApiError.notFound('Business not found');
   const page = parseInt(req.query.page as string) || DEFAULT_PAGE;
-  const limit = parseInt(req.query.limit as string) || DEFAULT_PAGE_SIZE;
+  const limit = Math.min(parseInt(req.query.limit as string) || DEFAULT_PAGE_SIZE, 100);
   const type = req.query.type as string;
   const status = req.query.status as string;
 

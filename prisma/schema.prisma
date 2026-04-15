@@ -224,6 +224,9 @@ model Call {
   business         Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
   order            Order?
   reservation      Reservation?
+
+  @@index([businessId])
+  @@index([status])
 }
 
 model Order {
@@ -249,6 +252,10 @@ model Order {
   posOrderId      String?
   business        Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
   call            Call?       @relation(fields: [callId], references: [id])
+
+  @@index([businessId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model Reservation {
@@ -271,6 +278,10 @@ model Reservation {
   externalId             String?
   business               Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
   call                   Call?             @relation(fields: [callId], references: [id])
+
+  @@index([businessId])
+  @@index([status])
+  @@index([dateTime])
 }
 
 model MenuCategory {
@@ -282,6 +293,8 @@ model MenuCategory {
   updatedAt  DateTime   @updatedAt
   business   Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
   items      MenuItem[]
+
+  @@index([businessId])
 }
 
 model MenuItem {
@@ -294,6 +307,9 @@ model MenuItem {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
   category    MenuCategory   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@index([categoryId])
+  @@index([status])
 }
 
 model Integration {

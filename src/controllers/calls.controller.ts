@@ -9,7 +9,7 @@ export const listCalls = asyncHandler(async (req: Request, res: Response) => {
   const businessId = req.user!.businessId;
   if (!businessId) throw ApiError.notFound('Business not found');
   const page = parseInt(req.query.page as string) || DEFAULT_PAGE;
-  const limit = parseInt(req.query.limit as string) || DEFAULT_PAGE_SIZE;
+  const limit = Math.min(parseInt(req.query.limit as string) || DEFAULT_PAGE_SIZE, 100);
   const filter = req.query.filter as string; // All, Orders, Reservations, Enquiries, Missed
   const dateRange = req.query.date as string; // today, yesterday, week, month
 

@@ -80,6 +80,9 @@ const envSchema = z.object({
   // ElevenLabs demo agent
   ELEVENLABS_DEMO_AGENT_ID: z.string().default(''),
 
+  // Stripe Connect (for businesses receiving payments via our platform)
+  STRIPE_CLIENT_ID: z.string().default(''),
+
   // Admin bootstrap
   ADMIN_EMAIL: z.string().default(''),
   ADMIN_PASSWORD: z.string().default(''),
