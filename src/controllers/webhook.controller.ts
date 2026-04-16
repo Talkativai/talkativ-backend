@@ -160,6 +160,11 @@ export const posPaymentReturn = asyncHandler(async (req: Request, res: Response)
 });
 
 // ─── ElevenLabs Webhook ──────────────────────────────────────────────────────
+// ElevenLabs sends:
+//   conversation_initiation_metadata — fires when a call starts
+//   post_call_transcription          — fires after call ends (primary delivery)
+// Both use { type: "...", data: { agent_id, conversation_id, ... } }
+// Legacy field "event" also checked for backwards compat.
 export const elevenlabsWebhook = asyncHandler(async (req: Request, res: Response) => {
   // Verify webhook secret — only accept the dedicated x-webhook-secret header
   const secret = req.headers['x-webhook-secret'];
@@ -167,39 +172,128 @@ export const elevenlabsWebhook = asyncHandler(async (req: Request, res: Response
     throw ApiError.unauthorized('Invalid webhook secret');
   }
 
-  const { event, data } = req.body;
+  const eventType: string = req.body.type || req.body.event || '';
+  const data: any = req.body.data || {};
 
-  if (event === 'conversation_initiation_metadata') {
-    // Create a new call record
-    const businessId = data.business_id;
+  // Helper: look up business from agent_id (ElevenLabs never sends business_id directly)
+  const lookupBusiness = async (agentId: string | undefined) => {
+    if (!agentId) return null;
+    const agent = await prisma.agent.findFirst({ where: { elevenlabsAgentId: agentId } });
+    return agent?.businessId ?? null;
+  };
+
+  // Helper: format ElevenLabs transcript array → readable "Role: text\n" string
+  const formatTranscript = (raw: any): string | null => {
+    if (!raw) return null;
+    if (typeof raw === 'string') return raw;
+    if (Array.isArray(raw)) {
+      return raw
+        .map((t: any) => `${t.role === 'agent' ? 'Agent' : 'Caller'}: ${t.message || t.text || ''}`)
+        .filter(Boolean)
+        .join('\n');
+    }
+    return null;
+  };
+
+  if (eventType === 'conversation_initiation_metadata') {
+    // Call just started — create a LIVE record so tools (create_order, etc.) can link to it
+    const businessId = await lookupBusiness(data.agent_id);
     if (businessId) {
+      const callerPhone =
+        data.metadata?.phone_call?.caller_id ||
+        data.caller_phone ||
+        null;
       await prisma.call.create({
         data: {
           businessId,
-          callerPhone: data.caller_phone || null,
+          callerPhone,
           status: 'LIVE',
           elevenlabsConvId: data.conversation_id || null,
           startedAt: new Date(),
         },
       });
     }
-  } else if (event === 'conversation_ended') {
-    const convId = data.conversation_id;
-    if (convId) {
-      const call = await prisma.call.findFirst({ where: { elevenlabsConvId: convId } });
-      if (call) {
-        await prisma.call.update({
-          where: { id: call.id },
-          data: {
-            status: data.status === 'missed' ? 'MISSED' : 'COMPLETED',
-            duration: data.duration || null,
-            transcript: data.transcript || null,
-            outcome: data.outcome || null,
-            outcomeType: data.outcome_type || null,
-            endedAt: new Date(),
-          },
-        });
-      }
+
+  } else if (eventType === 'post_call_transcription' || eventType === 'conversation_ended') {
+    // Call has ended — upsert the call record and retroactively link orders/reservations
+    const convId: string | undefined = data.conversation_id;
+    const businessId = await lookupBusiness(data.agent_id);
+    if (!businessId) { res.json({ received: true }); return; }
+
+    const callerPhone =
+      data.metadata?.phone_call?.caller_id ||
+      data.caller_phone ||
+      null;
+    const durationSecs: number | null =
+      (data.metadata?.call_duration_secs != null ? Math.round(data.metadata.call_duration_secs) : null) ||
+      (data.duration != null ? Math.round(data.duration) : null);
+    const startedAt = data.metadata?.start_time_unix_secs
+      ? new Date(data.metadata.start_time_unix_secs * 1000)
+      : null;
+    const callStatus = data.status === 'missed' ? 'MISSED' : 'COMPLETED';
+    const transcript = formatTranscript(data.transcript);
+
+    // Outcome fields may come from ElevenLabs data-collection or tool-call metadata
+    const outcome: string | null = data.outcome || data.analysis?.transcript_summary || null;
+    const outcomeType: string | null = data.outcome_type || null;
+
+    let callId: string;
+
+    const existing = convId
+      ? await prisma.call.findFirst({ where: { elevenlabsConvId: convId } })
+      : null;
+
+    if (existing) {
+      await prisma.call.update({
+        where: { id: existing.id },
+        data: {
+          status: callStatus,
+          duration: durationSecs,
+          transcript,
+          outcome,
+          outcomeType,
+          callerPhone: callerPhone || existing.callerPhone,
+          endedAt: new Date(),
+          ...(startedAt && !existing.startedAt ? { startedAt } : {}),
+        },
+      });
+      callId = existing.id;
+    } else {
+      // No matching LIVE record — create from scratch using post-call data
+      const created = await prisma.call.create({
+        data: {
+          businessId,
+          callerPhone,
+          elevenlabsConvId: convId || null,
+          status: callStatus,
+          duration: durationSecs,
+          transcript,
+          outcome,
+          outcomeType,
+          startedAt: startedAt || new Date(),
+          endedAt: new Date(),
+        },
+      });
+      callId = created.id;
+    }
+
+    // Retroactively link orders/reservations created during this call that have no
+    // callId yet (happens when no LIVE record existed at tool-call time).
+    // callId is @unique so update one row at a time.
+    const callStart = startedAt || new Date(Date.now() - (durationSecs || 0) * 1000 - 5000);
+    const orphanOrder = await prisma.order.findFirst({
+      where: { businessId, callId: null, createdAt: { gte: callStart } },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (orphanOrder) {
+      await prisma.order.update({ where: { id: orphanOrder.id }, data: { callId } });
+    }
+    const orphanRes = await prisma.reservation.findFirst({
+      where: { businessId, callId: null, createdAt: { gte: callStart } },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (orphanRes) {
+      await prisma.reservation.update({ where: { id: orphanRes.id }, data: { callId } });
     }
   }
 
@@ -575,27 +669,32 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
 
   if (business.openingHours) {
     const now = new Date();
-    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const currentDay = dayNames[now.getDay()];
+    // Hours stored as { is24h: "true"|"false", mon: "09:00-17:00", tue: "closed", ... }
+    const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
     const hours = business.openingHours as Record<string, any>;
-    const todayHours = hours[currentDay];
+    const todayValue: string = hours[dayKeys[now.getDay()]] || '';
     const hoursStr = Object.entries(hours)
-      .filter(([_, v]: [string, any]) => !v.closed)
-      .map(([day, v]: [string, any]) => `${day}: ${v.open} - ${v.close}`)
+      .filter(([k, v]) => k !== 'is24h' && v !== 'closed')
+      .map(([day, v]) => `${day}: ${v}`)
       .join(', ');
 
     let isClosed = false;
-    if (!todayHours || todayHours.closed) {
+    if (hours.is24h === 'true') {
+      isClosed = false; // open around the clock
+    } else if (!todayValue || todayValue === 'closed') {
       isClosed = true;
-    } else if (todayHours.open && todayHours.close) {
-      // Parse "HH:MM" times and compare against current local time
-      const [openH, openM] = todayHours.open.split(':').map(Number);
-      const [closeH, closeM] = todayHours.close.split(':').map(Number);
-      const nowMinutes = now.getHours() * 60 + now.getMinutes();
-      const openMinutes = openH * 60 + openM;
-      const closeMinutes = closeH * 60 + closeM;
-      if (nowMinutes < openMinutes || nowMinutes >= closeMinutes) {
-        isClosed = true;
+    } else {
+      // Parse "HH:MM-HH:MM" format
+      const [openStr, closeStr] = todayValue.split('-');
+      if (openStr && closeStr) {
+        const [openH, openM] = openStr.split(':').map(Number);
+        const [closeH, closeM] = closeStr.split(':').map(Number);
+        const nowMinutes = now.getHours() * 60 + now.getMinutes();
+        const openMinutes = openH * 60 + openM;
+        const closeMinutes = closeH * 60 + closeM;
+        if (nowMinutes < openMinutes || nowMinutes >= closeMinutes) {
+          isClosed = true;
+        }
       }
     }
 
@@ -826,33 +925,40 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
 
   if (business.openingHours) {
     const reservationDate = new Date(date_time);
-    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const reservationDay = dayNames[reservationDate.getDay()];
+    const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    const dayLabels = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const hours = business.openingHours as Record<string, any>;
-    const dayHours = hours[reservationDay];
+    const dayKey = dayKeys[reservationDate.getDay()];
+    const dayLabel = dayLabels[reservationDate.getDay()];
+    const dayValue: string = hours[dayKey] || '';
     const hoursStr = Object.entries(hours)
-      .filter(([_, v]: [string, any]) => !v.closed)
-      .map(([day, v]: [string, any]) => `${day}: ${v.open} - ${v.close}`)
+      .filter(([k, v]) => k !== 'is24h' && v !== 'closed')
+      .map(([day, v]) => `${day}: ${v}`)
       .join(', ');
 
     let isUnavailable = false;
-    if (!dayHours || dayHours.closed) {
+    if (hours.is24h === 'true') {
+      isUnavailable = false;
+    } else if (!dayValue || dayValue === 'closed') {
       isUnavailable = true;
-    } else if (dayHours.open && dayHours.close) {
-      const [openH, openM] = dayHours.open.split(':').map(Number);
-      const [closeH, closeM] = dayHours.close.split(':').map(Number);
-      const reservationMinutes = reservationDate.getHours() * 60 + reservationDate.getMinutes();
-      const openMinutes = openH * 60 + openM;
-      const closeMinutes = closeH * 60 + closeM;
-      if (reservationMinutes < openMinutes || reservationMinutes >= closeMinutes) {
-        isUnavailable = true;
+    } else {
+      const [openStr, closeStr] = dayValue.split('-');
+      if (openStr && closeStr) {
+        const [openH, openM] = openStr.split(':').map(Number);
+        const [closeH, closeM] = closeStr.split(':').map(Number);
+        const reservationMinutes = reservationDate.getHours() * 60 + reservationDate.getMinutes();
+        const openMinutes = openH * 60 + openM;
+        const closeMinutes = closeH * 60 + closeM;
+        if (reservationMinutes < openMinutes || reservationMinutes >= closeMinutes) {
+          isUnavailable = true;
+        }
       }
     }
 
     if (isUnavailable) {
       res.json({
         error: true,
-        message: `Sorry, we're not available on ${reservationDay} at that time. Our opening hours are: ${hoursStr || 'not set'}. Would you like to book for a different day or time?`,
+        message: `Sorry, we're not available on ${dayLabel} at that time. Our opening hours are: ${hoursStr || 'not set'}. Would you like to book for a different day or time?`,
       });
       return;
     }
@@ -1132,11 +1238,14 @@ export const updateReservation = asyncHandler(async (req: Request, res: Response
   // Validate new date if business hours exist
   if (new_date_time && reservation.business.openingHours) {
     const newDate = new Date(new_date_time);
-    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const dayName = dayNames[newDate.getDay()];
+    const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    const dayLabels = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const hours = reservation.business.openingHours as Record<string, any>;
-    if (hours[dayName]?.closed) {
-      res.json({ error: true, message: `Sorry, we're closed on ${dayName}. Please choose a different day.` });
+    const dayKey = dayKeys[newDate.getDay()];
+    const dayLabel = dayLabels[newDate.getDay()];
+    const dayValue: string = hours[dayKey] || '';
+    if (hours.is24h !== 'true' && (!dayValue || dayValue === 'closed')) {
+      res.json({ error: true, message: `Sorry, we're closed on ${dayLabel}. Please choose a different day.` });
       return;
     }
   }

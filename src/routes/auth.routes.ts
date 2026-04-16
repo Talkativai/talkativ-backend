@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { env } from '../config/env.js';
 import { validate } from '../middleware/validate.js';
-import { authLimiter } from '../middleware/rateLimiter.js';
+import { authLimiter, refreshLimiter } from '../middleware/rateLimiter.js';
 import { authenticate } from '../middleware/auth.js';
 import { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema, staffLoginSchema } from '../validators/auth.validator.js';
 import * as authController from '../controllers/auth.controller.js';
@@ -14,7 +14,7 @@ router.post(`/login/${env.AUTH_LOGIN_HASH}`, authLimiter, validate(loginSchema),
 router.post(`/staff-login/${env.AUTH_LOGIN_HASH}`, authLimiter, validate(staffLoginSchema), authController.staffLogin);
 
 // Public token management
-router.post('/refresh-token', authLimiter, authController.refreshToken);
+router.post('/refresh-token', refreshLimiter, authController.refreshToken);
 router.post('/logout', authController.logout);
 
 // Password reset (public)

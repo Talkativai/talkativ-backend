@@ -9,6 +9,18 @@ export const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Separate, more permissive limiter for the refresh-token endpoint.
+// The refresh token is already protected by the httpOnly cookie + token rotation,
+// so brute-force isn't a concern here. The strict authLimiter (5/15 min) was
+// exhausting the budget during normal active use, causing unexpected logouts.
+export const refreshLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60, // 60 refreshes per 15 min — ~1 every 15 seconds, far more than any normal session needs
+  message: { error: 'Too many token refresh attempts. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 export const apiLimiter = rateLimit({
   windowMs: API_RATE_LIMIT.windowMs,
   max: API_RATE_LIMIT.max,
