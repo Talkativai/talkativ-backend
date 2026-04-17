@@ -316,7 +316,7 @@ export const buildSystemPrompt = (business: any) => {
 
   // ── Reservation policy ─────────────────────────────────────────────────────
   const resPol = business.reservationPolicy;
-  const resRules = resPol ? `
+  const resRules = resPol?.reservationsEnabled ? `
   - Reservations Enabled: Yes
   - Max Party Size: ${resPol.maxPartySize} guests
   - Booking Lead Time: ${resPol.bookingLeadTime} hours
