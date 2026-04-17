@@ -181,18 +181,19 @@ model OrderingPolicy {
 }
 
 model ReservationPolicy {
-  id                String      @id @default(uuid())
-  businessId        String      @unique
-  depositRequired   Boolean     @default(false)
-  depositAmount     Float       @default(0)
-  depositType       DepositType @default(PER_GUEST)
-  maxPartySize      Int         @default(20)
-  bookingLeadTime   Int         @default(24)
-  cancellationHours Int         @default(24)
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
-  refundPercentage  Int         @default(100)
-  business          Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  id                    String      @id @default(uuid())
+  businessId            String      @unique
+  reservationsEnabled   Boolean     @default(false)
+  depositRequired       Boolean     @default(false)
+  depositAmount         Float       @default(0)
+  depositType           DepositType @default(PER_GUEST)
+  maxPartySize          Int         @default(20)
+  bookingLeadTime       Int         @default(24)
+  cancellationHours     Int         @default(24)
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  refundPercentage      Int         @default(100)
+  business              Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
 
 model OtpToken {

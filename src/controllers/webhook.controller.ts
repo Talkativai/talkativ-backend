@@ -972,6 +972,12 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
     return;
   }
 
+  // Block if reservations have not been enabled by the business owner
+  if (!business.reservationPolicy?.reservationsEnabled) {
+    res.json({ error: true, message: "I'm sorry, we're not currently accepting reservations. Please call back or visit us in person to make a booking." });
+    return;
+  }
+
   // Find the first connected reservation integration (resOS, ResDiary, OpenTable, Collins)
   const reservationIntegration = business.integrations?.find(
     (i: any) => ['resOS', 'ResDiary', 'OpenTable', 'Collins'].includes(i.name) && i.status === 'CONNECTED'
