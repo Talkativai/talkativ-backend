@@ -84,13 +84,13 @@ export const posPaymentReturn = asyncHandler(async (req: Request, res: Response)
   if (type === 'order') {
     record = await prisma.order.findUnique({
       where: { id },
-      include: { business: { include: { integrations: true } } },
+      include: { business: { include: { integrations: true, notifSettings: true } } },
     });
     business = record?.business;
   } else {
     record = await prisma.reservation.findUnique({
       where: { id },
-      include: { business: { include: { integrations: true } } },
+      include: { business: { include: { integrations: true, notifSettings: true } } },
     });
     business = record?.business;
   }
@@ -123,15 +123,43 @@ export const posPaymentReturn = asyncHandler(async (req: Request, res: Response)
   if (type === 'order') {
     await prisma.order.update({ where: { id }, data: { paymentStatus: 'paid', status: 'CONFIRMED' } });
 
+    const amountPaid = Number(record.amount);
+
     if (record.customerPhone && twilioService.isValidPhoneNumber(record.customerPhone)) {
       twilioService.sendSms(
         record.customerPhone,
         `Hi ${record.customerName}, your payment to ${business.name} is confirmed! Order #${id.slice(0, 8)} is being prepared.`,
       ).catch(() => {});
     }
+
+    if (record.customerEmail) {
+      emailService.sendOrderPaymentConfirmation(
+        record.customerEmail,
+        record.customerName,
+        business.name,
+        record.id,
+        record.items,
+        amountPaid,
+      ).catch(err => console.error('[Email] Order payment confirm to customer failed:', err));
+    }
+
+    if (business.email && business.notifSettings?.emailNewOrder !== false) {
+      emailService.sendBusinessOrderPaymentReceived(
+        business.email,
+        business.name,
+        record.id,
+        record.customerName,
+        record.customerPhone,
+        record.items,
+        amountPaid,
+      ).catch(err => console.error('[Email] Business order payment alert failed:', err));
+    }
+
     return res.redirect(`${env.FRONTEND_URL}/#/payment-success?order_id=${id}`);
   } else {
     await prisma.reservation.update({ where: { id }, data: { depositPaid: true, status: 'CONFIRMED' } });
+
+    const depositPaid = Number(record.depositAmount);
 
     const resIntegration = business.integrations?.find(
       (i: any) => ['resOS', 'ResDiary', 'OpenTable', 'Collins'].includes(i.name) && i.status === 'CONNECTED',
@@ -142,19 +170,46 @@ export const posPaymentReturn = asyncHandler(async (req: Request, res: Response)
         guestPhone: record.guestPhone,
         guests: record.guests,
         dateTime: record.dateTime.toISOString(),
-        notes: 'Deposit paid via POS',
+        notes: `Deposit of £${depositPaid.toFixed(2)} paid via POS`,
       }).catch(() => {});
     }
 
+    const formattedDate = record.dateTime.toLocaleDateString('en-GB', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+
     if (record.guestPhone && twilioService.isValidPhoneNumber(record.guestPhone)) {
-      const formattedDate = record.dateTime.toLocaleDateString('en-GB', {
-        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
-      });
       twilioService.sendSms(
         record.guestPhone,
         `Hi ${record.guestName}, your deposit for ${business.name} on ${formattedDate} is confirmed! Booking ref: #${id.slice(0, 8)}`,
       ).catch(() => {});
     }
+
+    if (record.guestEmail) {
+      emailService.sendReservationDepositConfirmation(
+        record.guestEmail,
+        record.guestName,
+        business.name,
+        record.dateTime,
+        record.guests,
+        depositPaid,
+        record.id,
+      ).catch(err => console.error('[Email] Deposit confirm to guest failed:', err));
+    }
+
+    if (business.email && business.notifSettings?.emailNewReservation !== false) {
+      emailService.sendBusinessDepositReceived(
+        business.email,
+        business.name,
+        record.id,
+        record.guestName,
+        record.guestPhone,
+        record.guests,
+        record.dateTime,
+        depositPaid,
+      ).catch(err => console.error('[Email] Business deposit alert failed:', err));
+    }
+
     return res.redirect(`${env.FRONTEND_URL}/#/payment-success?reservation_id=${id}`);
   }
 });

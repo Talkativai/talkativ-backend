@@ -4,6 +4,10 @@ import { env } from '../config/env.js';
 // Square
 // ─────────────────────────────────────────────────────────────────────────────
 
+const SQUARE_BASE_URL = env.SQUARE_ENVIRONMENT === 'production'
+  ? 'https://connect.squareup.com'
+  : 'https://connect.squareupsandbox.com';
+
 export const createSquarePaymentLink = async (
   cfg: { accessToken: string; locationId: string },
   orderId: string,
@@ -31,7 +35,7 @@ export const createSquarePaymentLink = async (
       },
     };
 
-    const res = await fetch('https://connect.squareup.com/v2/online-checkout/payment-links', {
+    const res = await fetch(`${SQUARE_BASE_URL}/v2/online-checkout/payment-links`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${cfg.accessToken}`,
@@ -61,7 +65,7 @@ export const verifySquarePayment = async (
   orderId: string, // our order ID = Square reference_id
 ): Promise<boolean> => {
   try {
-    const res = await fetch('https://connect.squareup.com/v2/orders/search', {
+    const res = await fetch(`${SQUARE_BASE_URL}/v2/orders/search`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${cfg.accessToken}`,

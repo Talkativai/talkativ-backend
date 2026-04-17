@@ -10,7 +10,10 @@ import crypto from 'crypto';
 // ─── Credential verification helpers ─────────────────────────────────────────
 
 async function verifySquareCredentials(accessToken: string): Promise<void> {
-  const res = await fetch('https://connect.squareup.com/v2/locations', {
+  const squareBase = env.SQUARE_ENVIRONMENT === 'production'
+    ? 'https://connect.squareup.com'
+    : 'https://connect.squareupsandbox.com';
+  const res = await fetch(`${squareBase}/v2/locations`, {
     headers: { Authorization: `Bearer ${accessToken}`, 'Square-Version': '2024-01-18' },
   });
   if (res.status === 401) throw ApiError.badRequest('Square access token is invalid. Check your credentials and try again.');
@@ -18,7 +21,10 @@ async function verifySquareCredentials(accessToken: string): Promise<void> {
 }
 
 async function verifyCloverCredentials(accessToken: string, merchantId: string): Promise<void> {
-  const res = await fetch(`https://api.clover.com/v3/merchants/${merchantId}`, {
+  const cloverBase = env.CLOVER_ENVIRONMENT === 'production'
+    ? 'https://api.clover.com'
+    : 'https://apisandbox.dev.clover.com';
+  const res = await fetch(`${cloverBase}/v3/merchants/${merchantId}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (res.status === 401) throw ApiError.badRequest('Clover access token is invalid. Check your credentials and try again.');
