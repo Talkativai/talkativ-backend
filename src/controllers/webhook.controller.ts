@@ -290,7 +290,12 @@ export const elevenlabsWebhook = asyncHandler(async (req: Request, res: Response
 
     // Outcome fields may come from ElevenLabs data-collection or tool-call metadata
     const outcome: string | null = data.outcome || data.analysis?.transcript_summary || null;
-    const outcomeType: string | null = data.outcome_type || null;
+    const validOutcomeTypes = ['ORDER', 'ENQUIRY', 'MISSED', 'RESERVATION'] as const;
+    type OutcomeTypeEnum = typeof validOutcomeTypes[number];
+    const rawOutcomeType = data.outcome_type || null;
+    const outcomeType: OutcomeTypeEnum | null = rawOutcomeType && validOutcomeTypes.includes(rawOutcomeType as OutcomeTypeEnum)
+      ? (rawOutcomeType as OutcomeTypeEnum)
+      : null;
 
     let callId: string;
 
