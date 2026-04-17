@@ -275,16 +275,24 @@ export const importFromFile = asyncHandler(async (req: Request, res: Response) =
 
 // ─── POS credential requirements ────────────────────────────────────────────
 const POS_REQUIRED_FIELDS: Record<PosSystem, string[]> = {
-  Clover:      ['accessToken', 'merchantId'],
+  // Ordering / KDS
   Square:      ['accessToken', 'locationId'],
-  OpenTable:   ['restaurantId', 'apiKey'],
+  Clover:      ['accessToken', 'merchantId'],
+  SumUp:       ['apiKey', 'merchantCode'],
+  Zettle:      ['apiKey'],
+  SpotOn:      ['apiKey', 'siteId'],
+  // Reservations
+  resOS:       ['apiKey', 'propertyId'],
+  ResDiary:    ['apiKey', 'restaurantId'],
+  OpenTable:   ['apiKey', 'restaurantId'],
+  Collins:     ['apiKey', 'venueId'],
+  // Legacy
   Aloha:       ['apiKey', 'siteId'],
   Olo:         ['apiKey', 'restaurantId'],
   Lightspeed:  ['apiKey', 'accountId'],
   TouchBistro: ['apiKey', 'locationId'],
   Revel:       ['apiKey', 'establishmentId'],
   Micros:      ['apiKey', 'locationId'],
-  SpotOn:      ['apiKey', 'siteId'],
 };
 
 // Per-POS fetch — extend each case with real API calls as integrations are built

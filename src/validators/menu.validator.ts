@@ -25,8 +25,12 @@ export const updateItemSchema = z.object({
 });
 
 export const SUPPORTED_POS_SYSTEMS = [
-  'Clover', 'Square', 'OpenTable', 'Aloha', 'Olo',
-  'Lightspeed', 'TouchBistro', 'Revel', 'Micros', 'SpotOn',
+  // Ordering / KDS
+  'Square', 'Clover', 'SumUp', 'Zettle', 'SpotOn',
+  // Reservations
+  'resOS', 'ResDiary', 'OpenTable', 'Collins',
+  // Legacy (kept for backwards-compat)
+  'Aloha', 'Olo', 'Lightspeed', 'TouchBistro', 'Revel', 'Micros',
 ] as const;
 
 export type PosSystem = (typeof SUPPORTED_POS_SYSTEMS)[number];

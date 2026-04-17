@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { Request, Response, CookieOptions } from 'express';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/apiError.js';
 import prisma from '../config/db.js';
@@ -7,6 +7,19 @@ import * as authService from '../services/auth.service.js';
 import * as emailService from '../services/email.service.js';
 import * as googleOAuth from '../services/google-oauth.service.js';
 import jwt from 'jsonwebtoken';
+
+// Use SameSite=None;Secure when the frontend is on HTTPS (cross-site on Render, etc.)
+// Falls back to SameSite=Lax for local HTTP dev.
+const frontendIsHttps = env.FRONTEND_URL?.startsWith('https://');
+const REFRESH_COOKIE_OPTIONS: CookieOptions = {
+  httpOnly: true,
+  secure: frontendIsHttps,
+  sameSite: frontendIsHttps ? 'none' : 'lax',
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+};
+// clearCookie requires the same path/secure/sameSite attributes but must NOT include maxAge
+// (maxAge takes precedence over expires in the browser — passing it would prevent clearing)
+const { maxAge: _omit, ...REFRESH_COOKIE_CLEAR_OPTIONS } = REFRESH_COOKIE_OPTIONS;
 // import { createClerkClient, verifyToken as verifyClerkToken } from '@clerk/backend'; // commented out — using Google OAuth
 // const clerkClient = createClerkClient({ secretKey: env.CLERK_SECRET_KEY }); // commented out
 
@@ -71,12 +84,7 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
   }
 
   // Set refresh token cookie
-  res.cookie('refresh_token', tokens.refreshToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-  });
+  res.cookie('refresh_token', tokens.refreshToken, REFRESH_COOKIE_OPTIONS);
 
   res.status(201).json({
     accessToken: tokens.accessToken,
@@ -126,12 +134,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   // Generate tokens
   const tokens = await authService.generateTokenPair(user);
 
-  res.cookie('refresh_token', tokens.refreshToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  });
+  res.cookie('refresh_token', tokens.refreshToken, REFRESH_COOKIE_OPTIONS);
 
   res.json({
     accessToken: tokens.accessToken,
@@ -154,12 +157,7 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response) => 
 
   const result = await authService.rotateRefreshToken(token);
 
-  res.cookie('refresh_token', result.refreshToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  });
+  res.cookie('refresh_token', result.refreshToken, REFRESH_COOKIE_OPTIONS);
 
   res.json({ accessToken: result.accessToken, user: result.user });
 });
@@ -171,7 +169,7 @@ export const logout = asyncHandler(async (req: Request, res: Response) => {
     if (stored) await prisma.refreshToken.delete({ where: { id: stored.id } });
   }
 
-  res.clearCookie('refresh_token');
+  res.clearCookie('refresh_token', REFRESH_COOKIE_CLEAR_OPTIONS);
   res.json({ message: 'Logged out successfully' });
 });
 
@@ -302,12 +300,7 @@ export const googleAuthCallback = asyncHandler(async (req: Request, res: Respons
       select: { onboardingDone: true, onboardingStep: true },
     });
 
-    res.cookie('refresh_token', jwtTokens.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    res.cookie('refresh_token', jwtTokens.refreshToken, REFRESH_COOKIE_OPTIONS);
 
     // Send welcome email for brand-new Google users (best effort)
     emailService.sendWelcomeEmail(user.email, user.firstName).catch(() => {});
