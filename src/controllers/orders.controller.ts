@@ -13,9 +13,27 @@ export const listOrders = asyncHandler(async (req: Request, res: Response) => {
   const type = req.query.type as string;
   const status = req.query.status as string;
 
+  const dateRange = req.query.date as string;
+
   const where: any = { businessId };
   if (type) where.type = type;
   if (status) where.status = status;
+
+  if (dateRange) {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    if (dateRange === 'today') where.createdAt = { gte: now };
+    else if (dateRange === 'yesterday') {
+      const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
+      where.createdAt = { gte: yesterday, lt: now };
+    } else if (dateRange === 'week') {
+      const week = new Date(now); week.setDate(week.getDate() - 7);
+      where.createdAt = { gte: week };
+    } else if (dateRange === 'month') {
+      const month = new Date(now); month.setMonth(month.getMonth() - 1);
+      where.createdAt = { gte: month };
+    }
+  }
 
   const [orders, total] = await Promise.all([
     prisma.order.findMany({
