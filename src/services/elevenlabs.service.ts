@@ -227,6 +227,32 @@ export const deleteAgent = async (agentId: string) => {
   return true;
 };
 
+// ─── Conversation Sync ────────────────────────────────────────────────────────
+// Fetch all conversations for a given agent and return them with phone metadata.
+export const listConversations = async (agentId: string, pageSize = 100): Promise<any[]> => {
+  const res = await fetch(
+    `${BASE_URL}/convai/conversations?agent_id=${agentId}&page_size=${pageSize}`,
+    { headers: headers() },
+  );
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`ElevenLabs listConversations failed: ${error}`);
+  }
+  const data = await res.json() as any;
+  return data.conversations || [];
+};
+
+export const getConversation = async (conversationId: string): Promise<any> => {
+  const res = await fetch(`${BASE_URL}/convai/conversations/${conversationId}`, {
+    headers: headers(),
+  });
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`ElevenLabs getConversation failed: ${error}`);
+  }
+  return res.json();
+};
+
 // ─── Text-to-Speech Preview ───────────────────────────────────────────────────
 
 export const textToSpeech = async (voiceId: string, text: string): Promise<Buffer> => {

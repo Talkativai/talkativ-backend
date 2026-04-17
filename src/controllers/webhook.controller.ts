@@ -250,23 +250,45 @@ export const elevenlabsWebhook = asyncHandler(async (req: Request, res: Response
     return null;
   };
 
-  if (eventType === 'conversation_initiation_metadata') {
+  if (
+    eventType === 'conversation_initiation_metadata' ||
+    eventType === 'conversation_initiation_client_data'
+  ) {
     // Call just started — create a LIVE record so tools (create_order, etc.) can link to it
-    const businessId = await lookupBusiness(data.agent_id);
+    const agentId = data.agent_id || req.body.agent_id;
+    const businessId = await lookupBusiness(agentId);
+    const convId = data.conversation_id || req.body.conversation_id || null;
+
     if (businessId) {
       const callerPhone =
+        data.metadata?.phone_call?.external_number ||
         data.metadata?.phone_call?.caller_id ||
         data.caller_phone ||
         null;
-      await prisma.call.create({
-        data: {
-          businessId,
-          callerPhone,
-          status: 'LIVE',
-          elevenlabsConvId: data.conversation_id || null,
-          startedAt: new Date(),
-        },
-      });
+
+      // Avoid duplicate LIVE records for the same conversation
+      const existing = convId
+        ? await prisma.call.findFirst({ where: { elevenlabsConvId: convId } })
+        : null;
+
+      if (!existing) {
+        await prisma.call.create({
+          data: {
+            businessId,
+            callerPhone,
+            status: 'LIVE',
+            elevenlabsConvId: convId,
+            startedAt: new Date(),
+          },
+        });
+      }
+    }
+
+    // ElevenLabs expects a specific response for conversation_initiation_client_data
+    // (dynamic variables / config overrides). Return empty overrides — agent uses its defaults.
+    if (eventType === 'conversation_initiation_client_data') {
+      res.json({});
+      return;
     }
 
   } else if (eventType === 'post_call_transcription' || eventType === 'conversation_ended') {
@@ -276,6 +298,7 @@ export const elevenlabsWebhook = asyncHandler(async (req: Request, res: Response
     if (!businessId) { res.json({ received: true }); return; }
 
     const callerPhone =
+      data.metadata?.phone_call?.external_number ||
       data.metadata?.phone_call?.caller_id ||
       data.caller_phone ||
       null;

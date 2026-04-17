@@ -264,6 +264,89 @@ export const autoSyncAgent = async (businessId: string): Promise<number> => {
   return menuCategories.reduce((n, c) => n + c.items.length, 0);
 };
 
+// ─── Sync Calls from ElevenLabs ──────────────────────────────────────────────
+// Fetches all conversations for this business's agent from ElevenLabs and
+// upserts any that are missing from our database (happens when post-call webhook
+// isn't configured or missed a delivery).
+export const syncCalls = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
+
+  const agent = await prisma.agent.findUnique({ where: { businessId } });
+  if (!agent?.elevenlabsAgentId) throw ApiError.badRequest('Agent not configured');
+
+  const result = await syncCallsForAgent(agent.elevenlabsAgentId, businessId);
+  res.json(result);
+});
+
+// ─── Internal helper — can be called without an HTTP request ─────────────────
+export const syncCallsForAgent = async (agentId: string, businessId: string) => {
+  const conversations = await elevenlabs.listConversations(agentId);
+
+  let imported = 0;
+  let updated = 0;
+
+  for (const conv of conversations) {
+    const convId: string = conv.conversation_id;
+    if (!convId) continue;
+
+    // Fetch full details (includes transcript + phone metadata)
+    const full = await elevenlabs.getConversation(convId);
+    const meta = full.metadata || {};
+    const phoneCall = meta.phone_call || {};
+
+    const callerPhone: string | null = phoneCall.external_number || null;
+    const durationSecs: number | null = meta.call_duration_secs != null
+      ? Math.round(meta.call_duration_secs) : null;
+    const startedAt = meta.start_time_unix_secs
+      ? new Date(meta.start_time_unix_secs * 1000) : null;
+    const callStatus = full.status === 'done' ? 'COMPLETED' : full.status === 'processing' ? 'LIVE' : 'COMPLETED';
+
+    // Format transcript
+    const rawTranscript: any[] = full.transcript || [];
+    const transcript = rawTranscript.length > 0
+      ? rawTranscript.map((t: any) => `${t.role === 'agent' ? 'Agent' : 'Caller'}: ${t.message || t.text || ''}`).filter(Boolean).join('\n')
+      : null;
+
+    const existing = await prisma.call.findFirst({ where: { elevenlabsConvId: convId } });
+
+    if (existing) {
+      // Update if transcript is missing or status is still LIVE
+      if (!existing.transcript || existing.status === 'LIVE') {
+        await prisma.call.update({
+          where: { id: existing.id },
+          data: {
+            status: callStatus as any,
+            duration: durationSecs ?? existing.duration,
+            transcript: transcript ?? existing.transcript,
+            callerPhone: callerPhone || existing.callerPhone,
+            endedAt: existing.endedAt || (callStatus === 'COMPLETED' ? new Date() : null),
+            ...(startedAt && !existing.startedAt ? { startedAt } : {}),
+          },
+        });
+        updated++;
+      }
+    } else {
+      // Create new record
+      await prisma.call.create({
+        data: {
+          businessId,
+          elevenlabsConvId: convId,
+          callerPhone,
+          status: callStatus as any,
+          duration: durationSecs,
+          transcript,
+          startedAt: startedAt || new Date(),
+          endedAt: callStatus === 'COMPLETED' ? new Date() : null,
+        },
+      });
+      imported++;
+    }
+  }
+
+  return { synced: conversations.length, imported, updated };
+};
+
 // ─── Rebuild system prompt endpoint ──────────────────────────────────────────
 export const rebuildSystemPrompt = asyncHandler(async (req: Request, res: Response) => {
   const businessId = req.user!.businessId;
