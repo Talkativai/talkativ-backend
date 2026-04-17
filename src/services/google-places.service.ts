@@ -26,10 +26,25 @@ function parseOpeningHoursStructured(openingHours: any): Record<string, string> 
   for (const period of openingHours.periods) {
     const dayKey = DAY_MAP[period.open?.day];
     if (!dayKey) continue;
-    const openH = String(period.open.hours ?? 0).padStart(2, '0');
-    const openM = String(period.open.minutes ?? 0).padStart(2, '0');
-    const closeH = String(period.close?.hours ?? 23).padStart(2, '0');
-    const closeM = String(period.close?.minutes ?? 59).padStart(2, '0');
+
+    // Old Places API returns time as "HHMM" string (e.g. "1400")
+    // New Places API v1 returns hour/minute as integers
+    let openH: string, openM: string, closeH: string, closeM: string;
+    if (period.open.time) {
+      openH = String(period.open.time).padStart(4, '0').slice(0, 2);
+      openM = String(period.open.time).padStart(4, '0').slice(2, 4);
+    } else {
+      openH = String(period.open.hour ?? period.open.hours ?? 0).padStart(2, '0');
+      openM = String(period.open.minute ?? period.open.minutes ?? 0).padStart(2, '0');
+    }
+    if (period.close?.time) {
+      closeH = String(period.close.time).padStart(4, '0').slice(0, 2);
+      closeM = String(period.close.time).padStart(4, '0').slice(2, 4);
+    } else {
+      closeH = String(period.close?.hour ?? period.close?.hours ?? 23).padStart(2, '0');
+      closeM = String(period.close?.minute ?? period.close?.minutes ?? 59).padStart(2, '0');
+    }
+
     result[dayKey] = `${openH}:${openM}-${closeH}:${closeM}`;
   }
 
