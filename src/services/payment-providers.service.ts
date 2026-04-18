@@ -16,6 +16,19 @@ export const createSquarePaymentLink = async (
   currency: string,
 ): Promise<string | null> => {
   try {
+    // Use the location's own currency — avoids mismatch between business currency
+    // (e.g. GBP) and the Square location currency (e.g. USD in sandbox).
+    let resolvedCurrency = currency.toUpperCase();
+    try {
+      const locRes = await fetch(`${SQUARE_BASE_URL}/v2/locations/${cfg.locationId}`, {
+        headers: { Authorization: `Bearer ${cfg.accessToken}`, 'Square-Version': '2024-01-18' },
+      });
+      if (locRes.ok) {
+        const locData = await locRes.json() as any;
+        if (locData.location?.currency) resolvedCurrency = locData.location.currency;
+      }
+    } catch { /* fall back to business currency */ }
+
     const body = {
       idempotency_key: orderId,
       order: {
@@ -25,7 +38,7 @@ export const createSquarePaymentLink = async (
           {
             name: description.slice(0, 100),
             quantity: '1',
-            base_price_money: { amount: Math.round(totalAmount * 100), currency: currency.toUpperCase() },
+            base_price_money: { amount: Math.round(totalAmount * 100), currency: resolvedCurrency },
           },
         ],
       },
