@@ -608,14 +608,27 @@ function getDistanceFromLatLonInMiles(lat1: number, lon1: number, lat2: number, 
   return R * c; // Distance in miles
 }
 
+// Normalise a UK postcode that may be missing the mid-space (e.g. "S12EL" → "S1 2EL")
+function normaliseUKPostcode(raw: string): string {
+  const cleaned = raw.replace(/\s+/g, '').toUpperCase();
+  // The inward part is always exactly 3 chars: digit + 2 letters
+  if (cleaned.length >= 5 && /\d[A-Z]{2}$/.test(cleaned)) {
+    const inward = cleaned.slice(-3);
+    const outward = cleaned.slice(0, -3);
+    return `${outward} ${inward}`;
+  }
+  return raw;
+}
+
 const geocodePostalCode = async (postalCode: string) => {
+  const normalised = normaliseUKPostcode(postalCode);
   try {
     const apiKey = env.GOOGLE_PLACES_API;
     if (!apiKey) {
       console.error("GOOGLE_PLACES_API key not configured");
       return null;
     }
-    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(postalCode)}&key=${apiKey}`;
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(normalised)}&key=${apiKey}`;
     const response = await fetch(url);
     const data = await response.json() as any;
     if (data.status === 'OK' && data.results?.length > 0) {
@@ -893,15 +906,18 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
   }
 
   let paymentLink: string | null = null;
+  let paymentLinkSent = false;
 
   // ── Payment routing: Square → SumUp → Stripe Connect → nothing ────────────
   // Money always goes directly to the business — we are never the payment intermediary.
-  if (payment_method === 'pay_now' && totalAmount > 0 && customer_phone) {
+  const squareInt  = business.integrations?.find((i: any) => i.name === 'Square'  && i.status === 'CONNECTED');
+  const sumupInt   = business.integrations?.find((i: any) => i.name === 'SumUp'   && i.status === 'CONNECTED');
+  const stripeInt  = business.integrations?.find((i: any) => i.name === 'Stripe'  && i.status === 'CONNECTED');
+  const hasPaymentIntegration = !!(squareInt || sumupInt || stripeInt);
+
+  if (payment_method === 'pay_now' && totalAmount > 0 && customer_phone && hasPaymentIntegration) {
     try {
       const businessCurrency = ((business as any).currency || 'GBP').toUpperCase();
-      const squareInt  = business.integrations?.find((i: any) => i.name === 'Square'  && i.status === 'CONNECTED');
-      const sumupInt   = business.integrations?.find((i: any) => i.name === 'SumUp'   && i.status === 'CONNECTED');
-      const stripeInt  = business.integrations?.find((i: any) => i.name === 'Stripe'  && i.status === 'CONNECTED');
 
       if (squareInt) {
         const cfg = squareInt.config as any;
@@ -925,12 +941,11 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
         await prisma.order.update({ where: { id: order.id }, data: { paymentIntentId: paymentIntent.id } });
         paymentLink = `${env.FRONTEND_URL}/#/pay?pi=${paymentIntent.client_secret}&order_id=${order.id}&type=order`;
       }
-      // If no payment integration is connected, pay_now silently falls through —
-      // the agent should only offer pay_now when a payment integration is available.
 
       if (paymentLink && customer_phone && twilioService.isValidPhoneNumber(customer_phone)) {
         const smsBody = `Hi ${customer_name}, your order at ${business.name} is confirmed!\n\nTotal: £${totalAmount.toFixed(2)}\nItems: ${items}\n\nPay here: ${paymentLink}`;
         twilioService.sendSms(customer_phone, smsBody).catch(err => console.error('[SMS] Failed to send payment link:', err));
+        paymentLinkSent = true;
       }
     } catch (payErr) {
       console.error('[Payment] Failed to create payment link:', payErr);
@@ -971,6 +986,10 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
     allergies: allergies || null,
     payment_method: payment_method || 'pay_on_delivery',
     payment_link: paymentLink,
+    payment_link_sent: paymentLinkSent,
+    payment_note: !paymentLinkSent && payment_method === 'pay_now'
+      ? 'No payment integration is connected — a payment link could not be sent. Tell the customer their order is confirmed and payment will be collected on delivery or collection instead.'
+      : undefined,
     total: totalAmount,
   });
 });
