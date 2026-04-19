@@ -237,8 +237,12 @@ export const fetchLiveMenuFromSquare = async (
     `${SQUARE_BASE}/v2/catalog/list?types=ITEM,CATEGORY`,
     { headers: { Authorization: `Bearer ${credentials.accessToken}`, 'Square-Version': '2024-02-22' } },
   );
-  if (!resp.ok) throw new Error(`Square API error: ${resp.status}`);
+  if (!resp.ok) {
+    const errBody = await resp.text();
+    throw new Error(`Square API error: ${resp.status} — ${errBody}`);
+  }
   const data = await resp.json() as { objects?: any[] };
+  console.log('[Square Menu] raw object count:', data.objects?.length ?? 0, 'types:', JSON.stringify([...new Set((data.objects||[]).map((o:any)=>o.type))]));
   const objects = data.objects || [];
 
   const catMap = new Map<string, string>();
