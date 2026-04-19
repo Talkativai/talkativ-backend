@@ -7,18 +7,14 @@ const headers = () => ({
   'Content-Type': 'application/json',
 });
 
-// ─── Agent Lifecycle ─────────────────────────────────────────────────────────
+// ─── Agent Tools Builder ──────────────────────────────────────────────────────
 
-export const createAgent = async (config: {
-  name: string;
-  systemPrompt: string;
-  firstMessage: string;
-  voiceId: string;
-  language?: string;
+export const buildAgentTools = (config: {
   businessId: string;
   transferEnabled?: boolean;
   transferNumber?: string;
-}) => {
+}): any[] => {
+  const biz = `Always send EXACTLY this value: ${config.businessId}`;
   const tools: any[] = [
     {
       type: 'webhook',
@@ -29,7 +25,7 @@ export const createAgent = async (config: {
       body_schema: {
         type: 'object',
         properties: {
-          business_id: { type: 'string', description: `Always send EXACTLY this value: ${config.businessId}` },
+          business_id: { type: 'string', description: biz },
           query: { type: 'string', description: 'Menu item name or category to search' },
         },
         required: ['business_id', 'query'],
@@ -38,13 +34,13 @@ export const createAgent = async (config: {
     {
       type: 'webhook',
       name: 'validate_delivery_address',
-      description: 'Validate a customer\'s postcode to check it falls within the delivery radius. MUST be called before creating a DELIVERY order.',
+      description: "Validate a customer's postcode to check it falls within the delivery radius. MUST be called before creating a DELIVERY order.",
       url: `${env.BACKEND_URL}/webhooks/public/check-delivery`,
       method: 'POST',
       body_schema: {
         type: 'object',
         properties: {
-          business_id: { type: 'string', description: `Always send EXACTLY this value: ${config.businessId}` },
+          business_id: { type: 'string', description: biz },
           customer_postal_code: { type: 'string', description: 'Postcode provided by the customer' },
         },
         required: ['business_id', 'customer_postal_code'],
@@ -59,9 +55,9 @@ export const createAgent = async (config: {
       body_schema: {
         type: 'object',
         properties: {
-          business_id: { type: 'string', description: `Always send EXACTLY this value: ${config.businessId}` },
+          business_id: { type: 'string', description: biz },
+          conversation_id: { type: 'string', description: 'Always send EXACTLY the current conversation_id so the backend can auto-detect the caller\'s phone number' },
           customer_name: { type: 'string', description: 'Full name' },
-          customer_phone: { type: 'string', description: 'Phone number — required to send payment link or confirmation by SMS' },
           delivery_address: { type: 'string', description: 'Formatted, validated delivery address if type is DELIVERY' },
           items: { type: 'string', description: 'Comma separated list of ordered items exactly as listed in the menu' },
           type: { type: 'string', enum: ['DELIVERY', 'COLLECTION'] },
@@ -69,37 +65,106 @@ export const createAgent = async (config: {
           payment_method: { type: 'string', enum: ['pay_now', 'pay_on_delivery', 'pay_on_collection'] },
           notes: { type: 'string', description: 'Special instructions or notes for the kitchen' },
         },
-        required: ['business_id', 'customer_name', 'items', 'type', 'payment_method'],
+        required: ['business_id', 'conversation_id', 'customer_name', 'items', 'type', 'payment_method'],
+      },
+    },
+    // ── Reservation tools ────────────────────────────────────────────────────
+    {
+      type: 'webhook',
+      name: 'check_availability',
+      description: 'Check if a table is available for a given date, time, and party size. ALWAYS call this before creating a reservation.',
+      url: `${env.BACKEND_URL}/webhooks/public/check-availability`,
+      method: 'POST',
+      body_schema: {
+        type: 'object',
+        properties: {
+          business_id: { type: 'string', description: biz },
+          date: { type: 'string', description: 'Date in YYYY-MM-DD format' },
+          time: { type: 'string', description: 'Time in HH:MM 24-hour format' },
+          guests: { type: 'number', description: 'Number of guests' },
+        },
+        required: ['business_id', 'date', 'time', 'guests'],
       },
     },
     {
       type: 'webhook',
       name: 'create_reservation',
-      description: 'Book a table reservation for the customer.',
+      description: 'Book a table reservation. Only call after check_availability confirms the slot is available.',
       url: `${env.BACKEND_URL}/webhooks/public/create-reservation`,
       method: 'POST',
       body_schema: {
         type: 'object',
         properties: {
-          business_id: { type: 'string', description: `Always send EXACTLY this value: ${config.businessId}` },
+          business_id: { type: 'string', description: biz },
+          conversation_id: { type: 'string', description: 'Always send EXACTLY the current conversation_id so the backend can auto-detect the caller\'s phone number' },
           guest_name: { type: 'string' },
-          guest_phone: { type: 'string', description: 'Phone number — required to send deposit link or booking confirmation by SMS' },
           guests: { type: 'number', description: 'Number of guests attending' },
-          date_time: { type: 'string', description: 'ISO date string representing the requested reservation date and time' },
+          date_time: { type: 'string', description: 'ISO 8601 date-time string for the reservation' },
         },
-        required: ['business_id', 'guest_name', 'guests', 'date_time'],
+        required: ['business_id', 'conversation_id', 'guest_name', 'guests', 'date_time'],
       },
     },
     {
       type: 'webhook',
+      name: 'get_reservation',
+      description: 'Look up an existing reservation by Talkativ reference (TLK-XXXX) or phone number. Use this before cancelling or updating.',
+      url: `${env.BACKEND_URL}/webhooks/public/get-reservation`,
+      method: 'POST',
+      body_schema: {
+        type: 'object',
+        properties: {
+          business_id: { type: 'string', description: biz },
+          conversation_id: { type: 'string', description: 'Always send EXACTLY the current conversation_id so the backend can auto-detect the caller\'s phone number' },
+          talkativ_ref: { type: 'string', description: 'Talkativ booking reference e.g. TLK-4A2F (preferred lookup key)' },
+        },
+        required: ['business_id', 'conversation_id'],
+      },
+    },
+    {
+      type: 'webhook',
+      name: 'cancel_reservation',
+      description: 'Cancel an existing reservation. Always call get_reservation first to confirm details and inform the customer of the refund/cancellation policy.',
+      url: `${env.BACKEND_URL}/webhooks/public/cancel-reservation`,
+      method: 'POST',
+      body_schema: {
+        type: 'object',
+        properties: {
+          business_id: { type: 'string', description: biz },
+          conversation_id: { type: 'string', description: 'Always send EXACTLY the current conversation_id so the backend can auto-detect the caller\'s phone number' },
+          talkativ_ref: { type: 'string', description: 'Talkativ booking reference e.g. TLK-4A2F (preferred lookup key)' },
+        },
+        required: ['business_id', 'conversation_id'],
+      },
+    },
+    {
+      type: 'webhook',
+      name: 'update_reservation',
+      description: 'Update an existing reservation (party size or date/time). If the new slot is unavailable, the response will include alternative slots — present them to the customer.',
+      url: `${env.BACKEND_URL}/webhooks/public/update-reservation`,
+      method: 'POST',
+      body_schema: {
+        type: 'object',
+        properties: {
+          business_id: { type: 'string', description: biz },
+          conversation_id: { type: 'string', description: 'Always send EXACTLY the current conversation_id so the backend can auto-detect the caller\'s phone number' },
+          talkativ_ref: { type: 'string', description: 'Talkativ booking reference e.g. TLK-4A2F (preferred lookup key)' },
+          new_date_time: { type: 'string', description: 'New date/time as ISO 8601 string (omit if only changing guests)' },
+          new_guests: { type: 'number', description: 'New party size (omit if only changing date/time)' },
+        },
+        required: ['business_id', 'conversation_id'],
+      },
+    },
+    // ── Hours ────────────────────────────────────────────────────────────────
+    {
+      type: 'webhook',
       name: 'check_hours',
-      description: 'Check the restaurant\'s exact opening and closing hours for each day.',
+      description: "Check the restaurant's exact opening and closing hours for each day.",
       url: `${env.BACKEND_URL}/webhooks/public/check-hours`,
       method: 'POST',
       body_schema: {
         type: 'object',
         properties: {
-          business_id: { type: 'string', description: `Always send EXACTLY this value: ${config.businessId}` },
+          business_id: { type: 'string', description: biz },
         },
         required: ['business_id'],
       },
@@ -111,12 +176,30 @@ export const createAgent = async (config: {
       type: 'system',
       name: 'transfer_call',
       description: 'Transfer the call to a human manager.',
-      system_tool_mapping: {
-        type: 'transfer_call',
-        number: config.transferNumber,
-      },
+      system_tool_mapping: { type: 'transfer_call', number: config.transferNumber },
     });
   }
+
+  return tools;
+};
+
+// ─── Agent Lifecycle ─────────────────────────────────────────────────────────
+
+export const createAgent = async (config: {
+  name: string;
+  systemPrompt: string;
+  firstMessage: string;
+  voiceId: string;
+  language?: string;
+  businessId: string;
+  transferEnabled?: boolean;
+  transferNumber?: string;
+}) => {
+  const tools = buildAgentTools({
+    businessId: config.businessId,
+    transferEnabled: config.transferEnabled,
+    transferNumber: config.transferNumber,
+  });
 
   const res = await fetch(`${BASE_URL}/convai/agents/create`, {
     method: 'POST',
@@ -372,11 +455,21 @@ ${resRules}
 
 ${faqs ? `❓ FAQs:\n${faqs}\n\n---` : ''}
 YOUR TOOLS:
-- lookup_catalogue — confirm a specific item is currently available/in stock before placing an order
-- create_order — place a food order
-- create_reservation — book a table
-- check_hours — get today's opening hours
-${business.agent?.transferEnabled ? '- transfer_call — transfer to a human' : ''}
+🛒 Ordering:
+- lookup_catalogue — confirm a specific item is available/in stock before placing an order
+- validate_delivery_address — validate the customer's postcode for delivery eligibility (MUST call before create_order for DELIVERY)
+- create_order — place a food order (DELIVERY or COLLECTION)
+
+🗓️ Reservations:
+- check_availability — check if a table is available for a date, time, and party size (ALWAYS call before create_reservation)
+- create_reservation — book a table (only after check_availability confirms the slot is free)
+- get_reservation — look up an existing reservation by TLK reference or phone number (ALWAYS call before cancel or update)
+- cancel_reservation — cancel an existing reservation
+- update_reservation — update an existing reservation (date/time or party size)
+
+🕐 General:
+- check_hours — get the restaurant's opening hours for any day
+${business.agent?.transferEnabled ? '- transfer_call — transfer the call to a human manager' : ''}
 
 RULES (follow every single one, no exceptions):
 
@@ -396,7 +489,7 @@ RULES (follow every single one, no exceptions):
 
 5. 👤 MANAGER TRANSFER — ${business.agent?.transferEnabled ? 'If the customer asks to speak to a real person or manager, or is very frustrated, immediately call transfer_call.' : 'No transfer available. Politely explain and offer to take a message.'}
 
-6. 💳 PAYMENTS — Confirm payment method from what the Ordering Rules allow. Always collect the customer's phone number before finalising any order or reservation. Never ask for an email address. After calling create_order: if the response includes payment_link_sent: true, tell the customer "I've sent a payment link to your phone by text message." If payment_link_sent is false or absent, DO NOT promise a payment link — instead say "Your order is confirmed, you can pay on delivery/collection."
+6. 💳 PAYMENTS — Confirm payment method from what the Ordering Rules allow. The customer's phone number is captured automatically from the call — do NOT ask for it. Never ask for an email address. After calling create_order: if the response includes payment_link_sent: true, tell the customer "I've sent a payment link to your phone by text message." If payment_link_sent is false or absent, DO NOT promise a payment link — instead say "Your order is confirmed, you can pay on delivery/collection."
 
 7. 🔡 DATA CLARITY — If a name or phone number is unclear, ask the customer to repeat it. For phone numbers, read it back to confirm before proceeding.
 
@@ -405,6 +498,48 @@ RULES (follow every single one, no exceptions):
 9. ⏳ FILLER PHRASES — When calling a tool (e.g. validating an address), say a quick filler first so the caller doesn't wait in silence. E.g. "Let me just check that address for you."
 
 10. 📵 CALL ENDING — If the customer hasn't spoken for 10 seconds, ask "Are you still there?" If still no response after 5 more seconds, say a warm goodbye and end the call. Don't keep calls open unnecessarily.
+
+── RESERVATION WORKFLOW RULES ────────────────────────────────────────────────
+
+R1. 📅 BOOKING — Always follow this exact sequence:
+   a. Ask for date, time, and number of guests.
+   b. Call check_availability BEFORE ANYTHING ELSE. Never promise or assume a slot is free.
+   c. If available: confirm the slot out loud ("I have a table for [N] on [date] at [time] — shall I book that?").
+   d. Ask for the guest's full name only. The phone number is captured automatically — do NOT ask for it.
+   e. Call create_reservation. The response will include a Talkativ reference (e.g. TLK-4A2F) and confirmation SMS status.
+   f. Tell the customer: "Your table is booked. Your reference number is [TLK-XXXX] — I've also sent this to your phone."
+   g. If a deposit is required, say: "A deposit link has been sent to your phone. Please complete the payment to secure your booking." Never mention the amount unless the customer asks.
+   h. Always end with: "Full payment is due at the venue on the day."
+
+R2. ❌ UNAVAILABLE SLOT — If check_availability returns available: false:
+   a. Say: "I'm sorry, we don't have availability for [N] guests on [date] at [time]."
+   b. If the response includes alternative slots, read each one out: "However, I do have availability at [slot1], [slot2], or [slot3]. Would any of these work for you?"
+   c. If the customer picks an alternative, re-confirm and proceed with create_reservation for the new slot.
+   d. If no alternatives suit, apologise and end politely.
+
+R3. 🔍 LOOKUP BEFORE CANCEL/UPDATE — ALWAYS call get_reservation first using the TLK reference or phone number.
+   a. Read back the booking details to the customer so they can confirm it's the right one.
+   b. If no reservation is found, say: "I'm sorry, I couldn't find a booking with that reference. Could you double-check or give me the phone number used when booking?"
+
+R4. ❎ CANCELLATION FLOW:
+   a. After get_reservation, check the cancellation policy in the response.
+   b. If within the cancellation window: say "You're within the free cancellation window. I'll cancel this now." Call cancel_reservation.
+   c. If outside the window (no refund): say "Unfortunately this booking is outside the cancellation window, so a refund may not be available. Would you still like to cancel?" Only proceed if the customer confirms.
+   d. If partial refund: say "Based on the policy, you may be eligible for a [X]% refund. The business will process this manually. Would you like to go ahead?" Proceed on confirmation.
+   e. After cancelling, say: "Your booking [TLK-XXXX] has been cancelled. The business has been notified." Never promise a specific refund amount.
+
+R5. ✏️ UPDATE FLOW:
+   a. After get_reservation, ask what the customer wants to change (date/time and/or party size).
+   b. If changing date/time, call check_availability for the new slot first.
+   c. If the new slot is available: call update_reservation. Confirm: "Done — your booking is updated to [new details]. Your reference is still [TLK-XXXX]."
+   d. If the new slot is unavailable: present alternatives from the response. If no alternatives or none suit, ask: "Would you like to keep your original booking or cancel it instead?"
+   e. If changing party size only (no date change): call update_reservation directly.
+   f. If update_reservation returns an additional deposit link (extra guests): say "Because you've added more guests, an additional deposit is required. I've sent a new payment link to your phone."
+
+R6. 🔢 TLK REFERENCE — The TLK reference (e.g. TLK-4A2F) is the customer's booking ID. Always:
+   - Repeat it clearly when booking is created or updated.
+   - Spell it out letter by letter if needed: "That's T-L-K dash [letters]."
+   - Ask for it at the start of any cancel/update call. If the customer doesn't have it, their phone number is the fallback.
 
 OPENING GREETING:
 ${business.agent?.openingGreeting || business.greeting || `Hi, thanks for calling ${business.name}. How can I help you today?`}

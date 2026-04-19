@@ -102,6 +102,58 @@ export const updateResOSReservation = async (
   }
 };
 
+// ─── List reservations ────────────────────────────────────────────────────────
+export const listResOSReservations = async (
+  apiKey: string,
+  propertyId: string,
+): Promise<any[]> => {
+  try {
+    const res = await fetch(`${RESOS_BASE}/reservations`, {
+      headers: resosHeaders(apiKey, propertyId),
+    });
+    if (!res.ok) return [];
+    const data = await res.json() as any;
+    return data.data || data.reservations || (Array.isArray(data) ? data : []);
+  } catch {
+    return [];
+  }
+};
+
+// ─── Check availability ───────────────────────────────────────────────────────
+export interface ResOSAvailabilitySlot {
+  time: string;
+  available: boolean;
+}
+
+export const checkResOSAvailability = async (
+  apiKey: string,
+  propertyId: string,
+  date: string,
+  time: string,
+  guests: number,
+): Promise<{ available: boolean; slots: ResOSAvailabilitySlot[] }> => {
+  try {
+    const params = new URLSearchParams({ date, time, covers: String(guests) });
+    const res = await fetch(`${RESOS_BASE}/availability?${params}`, {
+      headers: resosHeaders(apiKey, propertyId),
+    });
+    if (!res.ok) return { available: false, slots: [] };
+    const data = await res.json() as any;
+    // Normalize — resOS returns available time slots array
+    const slots: ResOSAvailabilitySlot[] = (data.slots || data.available_times || []).map((s: any) => ({
+      time: s.time || s.start_time || s,
+      available: s.available !== false,
+    }));
+    const requestedSlot = slots.find(s => s.time === time || s.time?.startsWith(time));
+    return {
+      available: requestedSlot?.available ?? slots.length > 0,
+      slots: slots.filter(s => s.available),
+    };
+  } catch {
+    return { available: false, slots: [] };
+  }
+};
+
 // ─── Cancel reservation ───────────────────────────────────────────────────────
 export const cancelResOSReservation = async (
   apiKey: string,

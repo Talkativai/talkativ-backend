@@ -3,6 +3,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/apiError.js';
 import prisma from '../config/db.js';
 import * as elevenlabs from '../services/elevenlabs.service.js';
+import * as posService from '../services/pos.service.js';
 import { AVAILABLE_VOICES } from '../utils/constants.js';
 import { env } from '../config/env.js';
 import * as twilioService from '../services/twilio.service.js';
@@ -213,7 +214,7 @@ export const getSignedUrl = asyncHandler(async (req: Request, res: Response) => 
 
 // ─── Auto-Sync Helper (push latest menu + settings to ElevenLabs) ────────────
 export const autoSyncAgent = async (businessId: string): Promise<number> => {
-  const [business, agent, menuCategories, faqs, orderingPolicy, reservationPolicy] = await Promise.all([
+  const [business, agent, dbMenuCategories, faqs, orderingPolicy, reservationPolicy, orderingIntegration] = await Promise.all([
     prisma.business.findUnique({ where: { id: businessId }, include: { agent: true } }),
     prisma.agent.findUnique({ where: { businessId } }),
     prisma.menuCategory.findMany({
@@ -224,10 +225,36 @@ export const autoSyncAgent = async (businessId: string): Promise<number> => {
     prisma.faq.findMany({ where: { businessId }, orderBy: { position: 'asc' } }),
     prisma.orderingPolicy.findUnique({ where: { businessId } }),
     prisma.reservationPolicy.findUnique({ where: { businessId } }),
+    prisma.integration.findFirst({ where: { businessId, name: { in: ['Square', 'Clover'] }, status: 'CONNECTED' } }),
   ]);
 
   if (!business || !agent?.elevenlabsAgentId) {
     throw new Error('Agent not configured');
+  }
+
+  // Merge integration menu items into DB categories (integration items are read-only additions)
+  let menuCategories: any[] = [...dbMenuCategories];
+  if (orderingIntegration?.config) {
+    try {
+      const cfg = orderingIntegration.config as Record<string, string>;
+      const integrationMenu = orderingIntegration.name === 'Square'
+        ? await posService.fetchLiveMenuFromSquare({ accessToken: cfg.accessToken, locationId: cfg.locationId })
+        : await posService.fetchLiveMenuFromClover({ accessToken: cfg.accessToken, merchantId: cfg.merchantId });
+
+      for (const intCat of integrationMenu.categories) {
+        const existing = menuCategories.find(c => c.name.toLowerCase() === intCat.name.toLowerCase());
+        if (existing) {
+          // Merge — add integration items not already in this category
+          const existingNames = new Set(existing.items.map((i: any) => i.name.toLowerCase()));
+          const newItems = intCat.items.filter(i => !existingNames.has(i.name.toLowerCase()));
+          existing.items = [...existing.items, ...newItems];
+        } else {
+          menuCategories.push({ name: intCat.name, items: intCat.items });
+        }
+      }
+    } catch (err: any) {
+      console.error('[AutoSync] Integration menu fetch failed (non-fatal):', err.message);
+    }
   }
 
   const systemPrompt = elevenlabs.buildSystemPrompt({
@@ -248,7 +275,13 @@ export const autoSyncAgent = async (businessId: string): Promise<number> => {
     },
   });
 
-  // Push to ElevenLabs — update system prompt and first message together
+  const tools = elevenlabs.buildAgentTools({
+    businessId,
+    transferEnabled: agent.transferEnabled,
+    transferNumber: agent.transferNumber ?? undefined,
+  });
+
+  // Push to ElevenLabs — update system prompt, first message, and tools together
   await elevenlabs.updateAgent(agent.elevenlabsAgentId, {
     conversation_config: {
       agent: {
@@ -256,6 +289,7 @@ export const autoSyncAgent = async (businessId: string): Promise<number> => {
         ...(agent.openingGreeting ? { first_message: agent.openingGreeting } : {}),
       },
     },
+    tools,
   });
 
   // Save in DB so we have a record

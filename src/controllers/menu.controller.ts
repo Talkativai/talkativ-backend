@@ -3,6 +3,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/apiError.js';
 import prisma from '../config/db.js';
 import * as extractionService from '../services/extraction.service.js';
+import * as posService from '../services/pos.service.js';
 import { autoSyncAgent } from './agent.controller.js';
 import type { CategorizedData } from '../services/claude.service.js';
 import type { PosSystem } from '../validators/menu.validator.js';
@@ -271,6 +272,35 @@ export const importFromFile = asyncHandler(async (req: Request, res: Response) =
     message: `Imported ${result.menuItemsCreated} new items from ${fileName}`,
     categorized: buildCategorizedResponse(result.categorized, result.menuItemsCreated, result.duplicatesSkipped, result.faqsCreated, result.faqsDuplicated),
   });
+});
+
+// ─── Live integration menu (read-only, no DB write) ─────────────────────────
+export const getLiveIntegrationMenu = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
+
+  const integration = await prisma.integration.findFirst({
+    where: { businessId, name: { in: ['Square', 'Clover'] }, status: 'CONNECTED' },
+  });
+
+  if (!integration?.config) {
+    res.json({ source: null, categories: [] });
+    return;
+  }
+
+  const config = integration.config as Record<string, string>;
+  try {
+    let result: posService.IntegrationMenuResult;
+    if (integration.name === 'Square') {
+      result = await posService.fetchLiveMenuFromSquare({ accessToken: config.accessToken, locationId: config.locationId });
+    } else {
+      result = await posService.fetchLiveMenuFromClover({ accessToken: config.accessToken, merchantId: config.merchantId });
+    }
+    res.json(result);
+  } catch (err: any) {
+    console.error('[Integration Menu]', err.message);
+    res.json({ source: null, categories: [], error: 'Could not fetch menu from integration' });
+  }
 });
 
 // ─── POS credential requirements ────────────────────────────────────────────

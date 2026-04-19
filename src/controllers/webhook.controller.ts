@@ -9,7 +9,9 @@ import * as emailService from '../services/email.service.js';
 import * as twilioService from '../services/twilio.service.js';
 import * as posService from '../services/pos.service.js';
 import * as resosService from '../services/resos.service.js';
+import crypto from 'crypto';
 import * as paymentProviders from '../services/payment-providers.service.js';
+import * as elevenlabsService from '../services/elevenlabs.service.js';
 
 // ─── Helper: push reservation to whichever platform is connected ─────────────
 
@@ -62,6 +64,44 @@ async function pushReservationToIntegration(
 
   // OpenTable and Collins: credentials stored, push not yet implemented (requires partner approval)
   console.log(`[${integration.name}] Reservation stored locally — direct push not yet available.`);
+}
+
+// ─── Helper: resolve caller phone from conversation context ──────────────────
+// ElevenLabs sends conversation_id with every tool webhook call.
+// We first look up the LIVE call record (populated at call start), then fall back
+// to the ElevenLabs API. This lets us auto-detect the caller's number so the
+// agent never needs to ask for it.
+async function resolveCallerPhone(
+  conversationId: string | undefined,
+  businessId: string,
+  providedPhone: string | undefined,
+): Promise<string | null> {
+  if (providedPhone) return providedPhone;
+
+  // Check the LIVE call record populated by conversation_initiation_metadata
+  const query: any = { businessId, status: 'LIVE' };
+  if (conversationId) query.elevenlabsConvId = conversationId;
+
+  const activeCall = await prisma.call.findFirst({
+    where: query,
+    orderBy: { createdAt: 'desc' },
+    select: { callerPhone: true },
+  });
+  if (activeCall?.callerPhone) return activeCall.callerPhone;
+
+  // Fallback: fetch live from ElevenLabs API
+  if (conversationId) {
+    try {
+      const conv = await elevenlabsService.getConversation(conversationId);
+      return conv?.metadata?.phone_call?.external_number
+        || conv?.metadata?.phone_call?.caller_id
+        || null;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
 }
 
 // ─── Public: POS payment return (Square / SumUp redirect after payment) ──────
@@ -710,7 +750,7 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
   const {
     business_id,
     customer_name,
-    customer_phone,
+    conversation_id,
     items,
     type,
     allergies,
@@ -718,6 +758,8 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
     notes,
     delivery_address,
   } = req.body;
+
+  const customer_phone = await resolveCallerPhone(conversation_id, business_id, req.body.customer_phone);
 
   // Check business hours before accepting order
   const business = await prisma.business.findUnique({
@@ -994,14 +1036,87 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
   });
 });
 
+// ─── Helper: generate unique Talkativ reference (TLK-XXXX) ───────────────────
+const generateTalkativRef = async (): Promise<string> => {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const ref = `TLK-${crypto.randomBytes(3).toString('hex').toUpperCase().slice(0, 4)}`;
+    const exists = await prisma.reservation.findUnique({ where: { talkativRef: ref } });
+    if (!exists) return ref;
+  }
+  return `TLK-${Date.now().toString(36).toUpperCase().slice(-4)}`;
+};
+
+// ─── Check Availability (agent tool) ──────────────────────────────────────────
+export const checkAvailability = asyncHandler(async (req: Request, res: Response) => {
+  const { business_id, date, time, guests } = req.body;
+
+  if (!business_id || !date || !time || !guests) {
+    res.json({ error: true, message: 'business_id, date, time, and guests are required.' });
+    return;
+  }
+
+  const business = await prisma.business.findUnique({
+    where: { id: business_id },
+    include: { reservationPolicy: true, integrations: true },
+  });
+
+  if (!business || !business.reservationPolicy?.reservationsEnabled) {
+    res.json({ available: false, message: "Reservations are not currently available." });
+    return;
+  }
+
+  const partySize = Number(guests);
+  if (partySize > (business.reservationPolicy.maxPartySize || 20)) {
+    res.json({
+      available: false,
+      message: `Sorry, the maximum party size we accept is ${business.reservationPolicy.maxPartySize}. Would you like to book for a smaller group?`,
+    });
+    return;
+  }
+
+  const reservationIntegration = (business.integrations || []).find(
+    (i: any) => ['resOS', 'ResDiary'].includes(i.name) && i.status === 'CONNECTED',
+  );
+
+  if (!reservationIntegration?.config) {
+    // No integration — check basic opening hours only
+    res.json({ available: true, slots: [{ time, available: true }], message: `${date} at ${time} for ${partySize} guests is available.` });
+    return;
+  }
+
+  const cfg = reservationIntegration.config as Record<string, string>;
+
+  if (reservationIntegration.name === 'resOS' && cfg.apiKey && cfg.propertyId) {
+    const result = await resosService.checkResOSAvailability(cfg.apiKey, cfg.propertyId, date, time, partySize);
+    if (!result.available && result.slots.length === 0) {
+      res.json({ available: false, slots: [], message: `Unfortunately ${time} on ${date} for ${partySize} guests is not available. There are no alternative slots at this time.` });
+      return;
+    }
+    const slotTimes = result.slots.slice(0, 4).map(s => s.time).join(', ');
+    res.json({
+      available: result.available,
+      slots: result.slots,
+      message: result.available
+        ? `${date} at ${time} for ${partySize} guests is available.`
+        : `${time} on ${date} is unavailable for ${partySize} guests, but these times are open: ${slotTimes}. Which would you prefer?`,
+    });
+    return;
+  }
+
+  // ResDiary — no availability API, assume available
+  res.json({ available: true, slots: [{ time, available: true }], message: `${date} at ${time} for ${partySize} guests is available.` });
+});
+
 export const createReservation = asyncHandler(async (req: Request, res: Response) => {
   const {
     business_id,
     guest_name,
-    guest_phone,
+    conversation_id,
     guests,
     date_time,
   } = req.body;
+
+  const guest_phone = await resolveCallerPhone(conversation_id, business_id, req.body.guest_phone);
 
   // Check business hours before accepting reservation
   const business = await prisma.business.findUnique({
@@ -1095,6 +1210,8 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
     orderBy: { createdAt: 'desc' },
   });
 
+  const talkativRef = await generateTalkativRef();
+
   const reservation = await prisma.reservation.create({
     data: {
       businessId: business_id,
@@ -1106,6 +1223,7 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
       status: 'PENDING',
       depositRequired,
       depositAmount: actualDeposit,
+      talkativRef,
     },
   });
 
@@ -1151,7 +1269,7 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
       }
 
       if (paymentLink && twilioService.isValidPhoneNumber(guest_phone)) {
-        const smsBody = `Hi ${guest_name}, your table for ${guests} at ${business.name} on ${formattedDate} is almost confirmed!\n\nA deposit of £${actualDeposit.toFixed(2)} is required. Pay here: ${paymentLink}`;
+        const smsBody = `Hi ${guest_name}, your table for ${guests} at ${business.name} on ${formattedDate} is almost confirmed!\n\nBooking ref: ${talkativRef}\nA deposit of £${actualDeposit.toFixed(2)} is required. Pay here: ${paymentLink}\n\nFull payment due at the venue.`;
         twilioService.sendSms(guest_phone, smsBody).catch(err => console.error('[SMS] Failed to send deposit link:', err));
       }
     } catch (payErr) {
@@ -1159,7 +1277,7 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
     }
   } else if (guest_phone && twilioService.isValidPhoneNumber(guest_phone)) {
     // No deposit — send booking confirmation SMS
-    const smsBody = `Hi ${guest_name}, your reservation for ${guests} guest${guests > 1 ? 's' : ''} at ${business.name} on ${formattedDate} is confirmed! See you then.`;
+    const smsBody = `Hi ${guest_name}, your reservation for ${guests} guest${guests > 1 ? 's' : ''} at ${business.name} on ${formattedDate} is confirmed!\n\nBooking ref: ${talkativRef}\nFull payment due at the venue.`;
     twilioService.sendSms(guest_phone, smsBody).catch(err => console.error('[SMS] Failed to send reservation confirmation:', err));
   }
 
@@ -1200,7 +1318,8 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
 
   res.json({
     reservation_id: reservation.id,
-    confirmation: `Reservation created successfully!${depositMessage}`,
+    talkativ_ref: talkativRef,
+    confirmation: `Reservation created successfully! Booking reference: ${talkativRef}.${depositMessage} Full payment is due at the venue.`,
     deposit_required: depositRequired,
     deposit_amount: actualDeposit,
     payment_link: paymentLink,
@@ -1216,24 +1335,70 @@ export const checkHours = asyncHandler(async (req: Request, res: Response) => {
 
 // ─── Cancel Reservation (agent tool) ─────────────────────────────────────────
 // Called by ElevenLabs agent when a caller wants to cancel their reservation.
-export const cancelReservation = asyncHandler(async (req: Request, res: Response) => {
-  const { reservation_id, business_id, guest_phone } = req.body;
+// ─── Get Reservation (agent tool) ─────────────────────────────────────────────
+export const getReservation = asyncHandler(async (req: Request, res: Response) => {
+  const { talkativ_ref, reservation_id, business_id, conversation_id } = req.body;
+  const guest_phone = await resolveCallerPhone(conversation_id, business_id, req.body.guest_phone);
 
-  if (!reservation_id && !guest_phone) {
-    res.json({ error: true, message: 'Please provide the booking reference or the phone number used when booking.' });
+  if (!talkativ_ref && !reservation_id && !guest_phone) {
+    res.json({ error: true, message: 'Please provide the booking reference (e.g. TLK-XXXX) or phone number.' });
     return;
   }
 
-  // Look up reservation by ID or phone, scoped to this business
   const reservation = await prisma.reservation.findFirst({
     where: {
       businessId: business_id,
       status: { not: 'CANCELLED' },
-      ...(reservation_id ? { id: reservation_id } : {}),
-      ...(guest_phone && !reservation_id ? { guestPhone: guest_phone } : {}),
+      ...(talkativ_ref ? { talkativRef: talkativ_ref } : reservation_id ? { id: reservation_id } : { guestPhone: guest_phone }),
+    },
+    include: { business: { include: { reservationPolicy: true } } },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  if (!reservation) {
+    res.json({ error: true, message: "I couldn't find an active reservation with those details. Please double-check the reference or phone number." });
+    return;
+  }
+
+  const formattedDate = reservation.dateTime.toLocaleDateString('en-GB', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+
+  res.json({
+    found: true,
+    reservation_id: reservation.id,
+    talkativ_ref: reservation.talkativRef,
+    guest_name: reservation.guestName,
+    guests: reservation.guests,
+    date_time: reservation.dateTime.toISOString(),
+    formatted_date: formattedDate,
+    status: reservation.status,
+    deposit_paid: reservation.depositPaid,
+    deposit_amount: Number(reservation.depositAmount ?? 0),
+    note: reservation.note,
+    cancellation_hours: (reservation.business as any).reservationPolicy?.cancellationHours ?? 24,
+    refund_percentage: (reservation.business as any).reservationPolicy?.refundPercentage ?? 100,
+  });
+});
+
+export const cancelReservation = asyncHandler(async (req: Request, res: Response) => {
+  const { reservation_id, talkativ_ref, business_id, conversation_id } = req.body;
+  const guest_phone = await resolveCallerPhone(conversation_id, business_id, req.body.guest_phone);
+
+  if (!reservation_id && !talkativ_ref && !guest_phone) {
+    res.json({ error: true, message: 'Please provide the booking reference (e.g. TLK-XXXX) or the phone number used when booking.' });
+    return;
+  }
+
+  // Look up by talkativRef first, then UUID, then phone
+  const reservation = await prisma.reservation.findFirst({
+    where: {
+      businessId: business_id,
+      status: { not: 'CANCELLED' },
+      ...(talkativ_ref ? { talkativRef: talkativ_ref } : reservation_id ? { id: reservation_id } : { guestPhone: guest_phone }),
     },
     include: {
-      business: { include: { integrations: true, notifSettings: true } },
+      business: { include: { integrations: true, notifSettings: true, reservationPolicy: true } },
     },
     orderBy: { createdAt: 'desc' },
   });
@@ -1267,15 +1432,31 @@ export const cancelReservation = asyncHandler(async (req: Request, res: Response
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
   });
 
+  const ref = reservation.talkativRef || `#${reservation.id.slice(0, 8)}`;
+  const depositAmountNum = Number(reservation.depositAmount ?? 0);
+  const depositPaid = reservation.depositPaid && depositAmountNum > 0;
+
+  // Check cancellation policy for refund eligibility
+  const cancellationHours = (reservation.business as any).reservationPolicy?.cancellationHours ?? 24;
+  const refundPct = (reservation.business as any).reservationPolicy?.refundPercentage ?? 100;
+  const hoursUntilBooking = (reservation.dateTime.getTime() - Date.now()) / 3_600_000;
+  const refundEligible = depositPaid && hoursUntilBooking >= cancellationHours;
+  const refundAmount = refundEligible ? (depositAmountNum * refundPct) / 100 : 0;
+
   // SMS to guest
   if (reservation.guestPhone) {
+    const depositMsg = depositPaid
+      ? refundEligible
+        ? ` A refund of £${refundAmount.toFixed(2)} will be processed by the business.`
+        : ` Per the cancellation policy, the deposit of £${depositAmountNum.toFixed(2)} is non-refundable.`
+      : '';
     twilioService.sendSms(
       reservation.guestPhone,
-      `Hi ${reservation.guestName}, your reservation at ${reservation.business.name} on ${formattedDate} has been cancelled. Booking ref: #${reservation.id.slice(0, 8)}.`,
+      `Hi ${reservation.guestName}, your reservation at ${reservation.business.name} on ${formattedDate} has been cancelled. Ref: ${ref}.${depositMsg}`,
     ).catch(err => console.error('[SMS] Cancellation confirm failed:', err));
   }
 
-  // Email alerts
+  // Email to guest
   if (reservation.guestEmail) {
     emailService.sendReservationCancellationToGuest(
       reservation.guestEmail,
@@ -1286,7 +1467,14 @@ export const cancelReservation = asyncHandler(async (req: Request, res: Response
     ).catch(() => {});
   }
 
-  if (reservation.business.email && reservation.business.notifSettings?.emailNewReservation !== false) {
+  // Notify business owner via email AND SMS
+  if (reservation.business.email) {
+    const refundLine = depositPaid
+      ? refundEligible
+        ? `A refund of £${refundAmount.toFixed(2)} (${refundPct}%) is owed — please process manually.`
+        : `Deposit of £${depositAmountNum.toFixed(2)} is non-refundable per cancellation policy.`
+      : 'No deposit was paid.';
+
     emailService.sendBusinessReservationCancelled(
       reservation.business.email,
       reservation.business.name,
@@ -1295,17 +1483,28 @@ export const cancelReservation = asyncHandler(async (req: Request, res: Response
       reservation.guestPhone,
       reservation.dateTime,
     ).catch(() => {});
+
+    // SMS to business owner phone
+    const bizPhone = (reservation.business as any).phone;
+    if (bizPhone && twilioService.isValidPhoneNumber(bizPhone)) {
+      twilioService.sendSms(
+        bizPhone,
+        `[Talkativ] Reservation cancelled — ${reservation.guestName}, ${reservation.guests} guests, ${formattedDate}. Ref: ${ref}. ${refundLine}`,
+      ).catch(err => console.error('[SMS] Business cancel notify failed:', err));
+    }
   }
 
   let depositNote = '';
-  const depositAmountNum = Number(reservation.depositAmount ?? 0);
-  if (reservation.depositPaid && depositAmountNum > 0) {
-    depositNote = ` As a deposit of £${depositAmountNum.toFixed(2)} was paid, please contact ${reservation.business.name} directly to discuss any refund.`;
+  if (depositPaid) {
+    depositNote = refundEligible
+      ? ` A refund of £${refundAmount.toFixed(2)} is owed — the business has been notified to process it manually.`
+      : ` Per the cancellation policy, the deposit is non-refundable for cancellations within ${cancellationHours} hours of the booking.`;
   }
 
   res.json({
     success: true,
     reservation_id: reservation.id,
+    talkativ_ref: ref,
     confirmation: `Reservation for ${reservation.guestName} on ${formattedDate} has been cancelled.${depositNote}`,
   });
 });
@@ -1313,10 +1512,11 @@ export const cancelReservation = asyncHandler(async (req: Request, res: Response
 // ─── Update Reservation (agent tool) ──────────────────────────────────────────
 // Called by ElevenLabs agent when a caller wants to change date/time or party size.
 export const updateReservation = asyncHandler(async (req: Request, res: Response) => {
-  const { reservation_id, business_id, guest_phone, new_date_time, new_guests } = req.body;
+  const { reservation_id, talkativ_ref, business_id, conversation_id, new_date_time, new_guests } = req.body;
+  const guest_phone = await resolveCallerPhone(conversation_id, business_id, req.body.guest_phone);
 
-  if (!reservation_id && !guest_phone) {
-    res.json({ error: true, message: 'Please provide the booking reference or the phone number used when booking.' });
+  if (!reservation_id && !talkativ_ref && !guest_phone) {
+    res.json({ error: true, message: 'Please provide the booking reference (e.g. TLK-XXXX) or the phone number used when booking.' });
     return;
   }
 
@@ -1329,11 +1529,10 @@ export const updateReservation = asyncHandler(async (req: Request, res: Response
     where: {
       businessId: business_id,
       status: { not: 'CANCELLED' },
-      ...(reservation_id ? { id: reservation_id } : {}),
-      ...(guest_phone && !reservation_id ? { guestPhone: guest_phone } : {}),
+      ...(talkativ_ref ? { talkativRef: talkativ_ref } : reservation_id ? { id: reservation_id } : { guestPhone: guest_phone }),
     },
     include: {
-      business: { include: { integrations: true, notifSettings: true } },
+      business: { include: { integrations: true, notifSettings: true, reservationPolicy: true } },
     },
     orderBy: { createdAt: 'desc' },
   });
@@ -1343,7 +1542,9 @@ export const updateReservation = asyncHandler(async (req: Request, res: Response
     return;
   }
 
-  // Validate new date if business hours exist
+  const newGuests = new_guests ? Number(new_guests) : null;
+
+  // Validate new date against opening hours
   if (new_date_time && reservation.business.openingHours) {
     const newDate = new Date(new_date_time);
     const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
@@ -1358,11 +1559,79 @@ export const updateReservation = asyncHandler(async (req: Request, res: Response
     }
   }
 
+  // Check availability in integration if party size or time changes
+  const reservationIntegration = (reservation.business.integrations || []).find(
+    (i: any) => ['resOS', 'ResDiary'].includes(i.name) && i.status === 'CONNECTED',
+  );
+  if (reservationIntegration?.config && (new_date_time || newGuests)) {
+    const cfg = reservationIntegration.config as Record<string, string>;
+    const checkDate = new_date_time
+      ? new Date(new_date_time).toISOString().slice(0, 10)
+      : reservation.dateTime.toISOString().slice(0, 10);
+    const checkTime = new_date_time
+      ? new Date(new_date_time).toTimeString().slice(0, 5)
+      : reservation.dateTime.toTimeString().slice(0, 5);
+    const checkGuests = newGuests || reservation.guests;
+
+    if (reservationIntegration.name === 'resOS' && cfg.apiKey && cfg.propertyId) {
+      const avail = await resosService.checkResOSAvailability(cfg.apiKey, cfg.propertyId, checkDate, checkTime, checkGuests);
+      if (!avail.available) {
+        const altTimes = avail.slots.slice(0, 3).map(s => s.time).join(', ');
+        res.json({
+          error: true,
+          available: false,
+          alternative_slots: avail.slots,
+          message: altTimes
+            ? `${checkTime} on ${checkDate} for ${checkGuests} guests is not available. Available times: ${altTimes}. Would you like one of those, keep your current booking, or cancel?`
+            : `${checkTime} on ${checkDate} for ${checkGuests} guests is not available. Would you like to keep your current booking or cancel?`,
+        });
+        return;
+      }
+    }
+  }
+
+  // Calculate deposit difference if party size changes (per_guest type only)
+  let depositDiff = 0;
+  let newDepositTotal = Number(reservation.depositAmount ?? 0);
+  const resPol = (reservation.business as any).reservationPolicy;
+  if (newGuests && resPol?.depositRequired && resPol.depositType === 'PER_GUEST' && resPol.depositAmount > 0) {
+    newDepositTotal = resPol.depositAmount * newGuests;
+    depositDiff = newDepositTotal - Number(reservation.depositAmount ?? 0);
+  }
+
   const updatedData: any = {};
   if (new_date_time) updatedData.dateTime = new Date(new_date_time);
-  if (new_guests) updatedData.guests = Number(new_guests);
+  if (newGuests) updatedData.guests = newGuests;
+  if (depositDiff > 0) updatedData.depositAmount = newDepositTotal;
 
   await prisma.reservation.update({ where: { id: reservation.id }, data: updatedData });
+
+  // Handle additional deposit payment if needed
+  let depositPaymentLink: string | null = null;
+  if (depositDiff > 0 && reservation.guestPhone && depositDiff > 0.01) {
+    try {
+      const businessCurrency = ((reservation.business as any).currency || 'GBP').toUpperCase();
+      const stripeInt = (reservation.business.integrations || []).find((i: any) => i.name === 'Stripe' && i.status === 'CONNECTED');
+      if (stripeInt) {
+        const cfg = stripeInt.config as any;
+          const intent = await stripeService.createPaymentIntentWithConnect(
+          Math.round(depositDiff * 100),
+          businessCurrency.toLowerCase(),
+          { type: 'reservation_deposit_top_up', reservation_id: reservation.id },
+          cfg.accountId,
+        );
+        depositPaymentLink = `${env.FRONTEND_URL}/#/pay?pi=${intent.client_secret}&reservation_id=${reservation.id}&type=reservation`;
+        if (twilioService.isValidPhoneNumber(reservation.guestPhone)) {
+          twilioService.sendSms(
+            reservation.guestPhone,
+            `Hi ${reservation.guestName}, your booking has been updated to ${newGuests} guests. An additional deposit of £${depositDiff.toFixed(2)} is required. Pay here: ${depositPaymentLink}`,
+          ).catch(() => {});
+        }
+      }
+    } catch (err) {
+      console.error('[Update Reservation] Deposit top-up failed:', err);
+    }
+  }
 
   // Sync update to resOS if linked
   if (reservation.externalId) {
@@ -1386,19 +1655,31 @@ export const updateReservation = asyncHandler(async (req: Request, res: Response
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
   });
 
-  // SMS update confirmation
-  if (reservation.guestPhone) {
+  const ref = reservation.talkativRef || `#${reservation.id.slice(0, 8)}`;
+
+  // SMS update confirmation (only if no deposit top-up link was already sent)
+  if (reservation.guestPhone && !depositPaymentLink) {
     twilioService.sendSms(
       reservation.guestPhone,
-      `Hi ${reservation.guestName}, your reservation at ${reservation.business.name} has been updated.\n\nNew details — Date: ${formattedDate}, Party size: ${finalGuests} guest${finalGuests > 1 ? 's' : ''}. Booking ref: #${reservation.id.slice(0, 8)}.`,
+      `Hi ${reservation.guestName}, your reservation at ${reservation.business.name} has been updated.\n\nDate: ${formattedDate}, Party: ${finalGuests} guest${finalGuests > 1 ? 's' : ''}. Ref: ${ref}.\nFull payment due at the venue.`,
     ).catch(err => console.error('[SMS] Reservation update failed:', err));
+  }
+
+  let confirmMsg = `Reservation ${ref} updated! New date: ${formattedDate}, party of ${finalGuests}.`;
+  if (depositDiff > 0 && depositPaymentLink) {
+    confirmMsg += ` An additional deposit of £${depositDiff.toFixed(2)} is required. A payment link has been sent to the guest.`;
+  } else if (depositDiff > 0) {
+    confirmMsg += ` Note: the deposit increased by £${depositDiff.toFixed(2)} but no payment integration is connected to collect it.`;
   }
 
   res.json({
     success: true,
     reservation_id: reservation.id,
-    confirmation: `Reservation updated! New date: ${formattedDate}, party of ${finalGuests}. A confirmation SMS has been sent to the guest.`,
+    talkativ_ref: ref,
+    confirmation: confirmMsg,
     new_date_time: finalDate.toISOString(),
     new_guests: finalGuests,
+    deposit_difference: depositDiff > 0 ? depositDiff : undefined,
+    deposit_payment_link: depositPaymentLink || undefined,
   });
 });

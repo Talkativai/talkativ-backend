@@ -212,6 +212,87 @@ export const pushOrderToClover = async (
   };
 };
 
+// ─── Live menu fetch (read-only, no DB writes) ────────────────────────────────
+
+export interface IntegrationMenuItem {
+  name: string;
+  description?: string;
+  price: number;
+}
+
+export interface IntegrationMenuCategory {
+  name: string;
+  items: IntegrationMenuItem[];
+}
+
+export interface IntegrationMenuResult {
+  source: string;
+  categories: IntegrationMenuCategory[];
+}
+
+export const fetchLiveMenuFromSquare = async (
+  credentials: { accessToken: string; locationId: string },
+): Promise<IntegrationMenuResult> => {
+  const resp = await fetch(
+    `${SQUARE_BASE}/v2/catalog/list?types=ITEM,CATEGORY`,
+    { headers: { Authorization: `Bearer ${credentials.accessToken}`, 'Square-Version': '2024-02-22' } },
+  );
+  if (!resp.ok) throw new Error(`Square API error: ${resp.status}`);
+  const data = await resp.json() as { objects?: any[] };
+  const objects = data.objects || [];
+
+  const catMap = new Map<string, string>();
+  for (const obj of objects) {
+    if (obj.type === 'CATEGORY' && obj.category_data?.name) {
+      catMap.set(obj.id, obj.category_data.name);
+    }
+  }
+
+  const catItems = new Map<string, IntegrationMenuItem[]>();
+  for (const obj of objects) {
+    if (obj.type !== 'ITEM') continue;
+    const d = obj.item_data || {};
+    const name: string = d.name;
+    if (!name) continue;
+    const variation = (d.variations || [])[0];
+    const price = ((variation?.item_variation_data?.price_money?.amount || 0) / 100);
+    const catId = d.category_id || d.category?.id || '__uncategorized__';
+    const catName = catMap.get(catId) || 'Menu Items';
+    if (!catItems.has(catName)) catItems.set(catName, []);
+    catItems.get(catName)!.push({ name, description: d.description || undefined, price });
+  }
+
+  const categories: IntegrationMenuCategory[] = [];
+  for (const [name, items] of catItems) categories.push({ name, items });
+  return { source: 'Square', categories };
+};
+
+export const fetchLiveMenuFromClover = async (
+  credentials: { accessToken: string; merchantId: string },
+): Promise<IntegrationMenuResult> => {
+  const resp = await fetch(
+    `${CLOVER_BASE}/v3/merchants/${credentials.merchantId}/items?expand=categories&limit=500`,
+    { headers: { Authorization: `Bearer ${credentials.accessToken}` } },
+  );
+  if (!resp.ok) throw new Error(`Clover API error: ${resp.status}`);
+  const data = await resp.json() as { elements?: any[] };
+  const elements = data.elements || [];
+
+  const catItems = new Map<string, IntegrationMenuItem[]>();
+  for (const item of elements) {
+    const name: string = item.name;
+    if (!name) continue;
+    const price = (item.price || 0) / 100;
+    const catName = item.categories?.elements?.[0]?.name || 'Menu Items';
+    if (!catItems.has(catName)) catItems.set(catName, []);
+    catItems.get(catName)!.push({ name, price });
+  }
+
+  const categories: IntegrationMenuCategory[] = [];
+  for (const [name, items] of catItems) categories.push({ name, items });
+  return { source: 'Clover', categories };
+};
+
 // ─── Unified push ─────────────────────────────────────────────────────────────
 
 export const pushOrderToPOS = async (

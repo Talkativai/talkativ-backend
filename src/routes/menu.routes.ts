@@ -18,6 +18,7 @@ router.post('/import/image', upload.single('file'), menuController.importFromIma
 
 router.use(authenticate);
 
+router.get('/integration/live', menuController.getLiveIntegrationMenu);
 router.get('/categories', menuController.getCategories);
 router.get('/categories/:id/items', menuController.getCategoryItems);
 router.post('/categories', validate(createCategorySchema), menuController.createCategory);

@@ -5,6 +5,7 @@ import * as reservationsController from '../controllers/reservations.controller.
 const router = Router();
 router.use(authenticate);
 
+router.get('/integration/live', reservationsController.getLiveIntegrationReservations);
 router.get('/', reservationsController.listReservations);
 router.get('/stats', reservationsController.getReservationStats);
 router.post('/', reservationsController.createReservation);

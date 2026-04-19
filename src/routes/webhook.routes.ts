@@ -14,7 +14,9 @@ router.post('/elevenlabs', webhookLimiter, webhookController.elevenlabsWebhook);
 // Public tool endpoints (called by ElevenLabs during calls — no auth)
 router.post('/public/catalogue-lookup', webhookLimiter, webhookController.catalogueLookup);
 router.post('/public/create-order', webhookLimiter, webhookController.createOrder);
+router.post('/public/check-availability', webhookLimiter, webhookController.checkAvailability);
 router.post('/public/create-reservation', webhookLimiter, webhookController.createReservation);
+router.post('/public/get-reservation', webhookLimiter, webhookController.getReservation);
 router.post('/public/cancel-reservation', webhookLimiter, webhookController.cancelReservation);
 router.post('/public/update-reservation', webhookLimiter, webhookController.updateReservation);
 router.post('/public/check-hours', webhookLimiter, webhookController.checkHours);

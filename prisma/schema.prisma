@@ -277,6 +277,7 @@ model Reservation {
   depositRequired        Boolean           @default(false)
   guestEmail             String?
   externalId             String?
+  talkativRef            String?           @unique
   business               Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
   call                   Call?             @relation(fields: [callId], references: [id])
 
