@@ -12,11 +12,12 @@ router.use(authenticate);
 
 router.get('/', integrationsController.listIntegrations);
 router.post('/connect', integrationsController.connectIntegration);
-router.delete('/:id/disconnect', integrationsController.disconnectIntegration);
-router.get('/:id/status', integrationsController.getIntegrationStatus);
 
-// Stripe Connect
+// Stripe Connect — must be defined before /:id routes to avoid "stripe" matching as an ID
 router.get('/stripe/connect', integrationsController.stripeConnectInit);
 router.delete('/stripe/disconnect', integrationsController.stripeConnectDisconnect);
+
+router.delete('/:id/disconnect', integrationsController.disconnectIntegration);
+router.get('/:id/status', integrationsController.getIntegrationStatus);
 
 export default router;
