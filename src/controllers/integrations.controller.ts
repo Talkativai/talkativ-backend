@@ -151,7 +151,7 @@ export const getIntegrationStatus = asyncHandler(async (req: Request, res: Respo
 // Redirects the authenticated business owner to Stripe's OAuth consent screen.
 
 export const stripeConnectInit = asyncHandler(async (req: Request, res: Response) => {
-  if (!env.STRIPE_CLIENT_ID) throw ApiError.badRequest('Stripe Connect is not configured on this platform.');
+  if (!env.STRIPE_CONNECT_CLIENT_ID) throw ApiError.badRequest('Stripe Connect is not configured on this platform.');
 
   const businessId = req.user!.businessId;
   if (!businessId) throw ApiError.notFound('Business not found');
@@ -162,7 +162,7 @@ export const stripeConnectInit = asyncHandler(async (req: Request, res: Response
   const state = Buffer.from(JSON.stringify({ payload, sig })).toString('base64url');
 
   const params = new URLSearchParams({
-    client_id: env.STRIPE_CLIENT_ID,
+    client_id: env.STRIPE_CONNECT_CLIENT_ID,
     response_type: 'code',
     scope: 'read_write',
     redirect_uri: `${env.BACKEND_URL}/api/integrations/stripe/callback`,
@@ -244,9 +244,9 @@ export const stripeConnectDisconnect = asyncHandler(async (req: Request, res: Re
   const cfg = integration.config as any;
 
   // Deauthorise on Stripe side (best effort)
-  if (cfg?.accountId && env.STRIPE_CLIENT_ID) {
+  if (cfg?.accountId && env.STRIPE_CONNECT_CLIENT_ID) {
     try {
-      await stripe.oauth.deauthorize({ client_id: env.STRIPE_CLIENT_ID, stripe_user_id: cfg.accountId });
+      await stripe.oauth.deauthorize({ client_id: env.STRIPE_CONNECT_CLIENT_ID, stripe_user_id: cfg.accountId });
     } catch (err) {
       console.warn('[Stripe Connect] Deauthorise failed (ignored):', err);
     }
