@@ -180,15 +180,19 @@ export const stripeConnectInit = asyncHandler(async (req: Request, res: Response
 export const stripeConnectCallback = asyncHandler(async (req: Request, res: Response) => {
   const { code, state, error, error_description } = req.query as Record<string, string>;
 
-  const frontendIntegrationsUrl = `${env.FRONTEND_URL}/#/dashboard/integrations`;
+  // Query params MUST go before the # so React Router (HashRouter) can match the route.
+  // /#/dashboard/integrations?foo=1 → React Router sees path "/dashboard/integrations?foo=1" (broken)
+  // /?foo=1#/dashboard/integrations  → React Router sees path "/dashboard/integrations", search "?foo=1" (correct)
+  const base = env.FRONTEND_URL.replace(/\/$/, '');
+  const hashPath = '#/dashboard/integrations';
 
   if (error) {
     console.error('[Stripe Connect] OAuth error:', error, error_description);
-    return res.redirect(`${frontendIntegrationsUrl}?stripe_error=${encodeURIComponent(error_description || error)}`);
+    return res.redirect(`${base}?stripe_error=${encodeURIComponent(error_description || error)}${hashPath}`);
   }
 
   if (!code || !state) {
-    return res.redirect(`${frontendIntegrationsUrl}?stripe_error=missing_params`);
+    return res.redirect(`${base}?stripe_error=missing_params${hashPath}`);
   }
 
   let businessId: string;
@@ -201,7 +205,7 @@ export const stripeConnectCallback = asyncHandler(async (req: Request, res: Resp
     }
     businessId = JSON.parse(payload).businessId;
   } catch {
-    return res.redirect(`${frontendIntegrationsUrl}?stripe_error=invalid_state`);
+    return res.redirect(`${base}?stripe_error=invalid_state${hashPath}`);
   }
 
   try {
@@ -223,10 +227,10 @@ export const stripeConnectCallback = asyncHandler(async (req: Request, res: Resp
       },
     });
 
-    return res.redirect(`${frontendIntegrationsUrl}?stripe_connected=1`);
+    return res.redirect(`${base}?stripe_connected=1${hashPath}`);
   } catch (err: any) {
     console.error('[Stripe Connect] Token exchange failed:', err);
-    return res.redirect(`${frontendIntegrationsUrl}?stripe_error=${encodeURIComponent(err.message || 'connection_failed')}`);
+    return res.redirect(`${base}?stripe_error=${encodeURIComponent(err.message || 'connection_failed')}${hashPath}`);
   }
 });
 
