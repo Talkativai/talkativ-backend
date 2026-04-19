@@ -184,7 +184,9 @@ export const stripeConnectCallback = asyncHandler(async (req: Request, res: Resp
   // /#/dashboard/integrations?foo=1 → React Router sees path "/dashboard/integrations?foo=1" (broken)
   // /?foo=1#/dashboard/integrations  → React Router sees path "/dashboard/integrations", search "?foo=1" (correct)
   const base = env.FRONTEND_URL.replace(/\/$/, '');
-  const hashPath = '#/dashboard/integrations';
+  // Use #/dashboard (not #/dashboard/integrations) — dashboard uses state-based nav, not URL sub-paths.
+  // DashboardApp reads ?stripe_connected=1 from window.location.search to auto-open Integrations.
+  const hashPath = '#/dashboard';
 
   if (error) {
     console.error('[Stripe Connect] OAuth error:', error, error_description);
