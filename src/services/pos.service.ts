@@ -256,7 +256,8 @@ export const fetchLiveMenuFromSquare = async (
     if (!name) continue;
     const variation = (d.variations || [])[0];
     const price = ((variation?.item_variation_data?.price_money?.amount || 0) / 100);
-    const catId = d.category_id || d.category?.id || '__uncategorized__';
+    // Square v2024+: categories stored as array; older API used category_id
+    const catId = d.categories?.[0]?.id || d.category_id || d.category?.id || '__uncategorized__';
     const catName = catMap.get(catId) || 'Menu Items';
     if (!catItems.has(catName)) catItems.set(catName, []);
     catItems.get(catName)!.push({ name, description: d.description || undefined, price });
