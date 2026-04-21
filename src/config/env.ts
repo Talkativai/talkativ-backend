@@ -83,6 +83,18 @@ const envSchema = z.object({
   // Stripe Connect (for businesses receiving payments via our platform)
   STRIPE_CONNECT_CLIENT_ID: z.string().default(''),
 
+  // Square OAuth (one-tap connect)
+  SQUARE_CLIENT_ID: z.string().default(''),
+  SQUARE_CLIENT_SECRET: z.string().default(''),
+
+  // Clover OAuth (one-tap connect)
+  CLOVER_APP_ID: z.string().default(''),
+  CLOVER_APP_SECRET: z.string().default(''),
+
+  // SumUp OAuth (one-tap connect)
+  SUMUP_CLIENT_ID: z.string().default(''),
+  SUMUP_CLIENT_SECRET: z.string().default(''),
+
   // Admin bootstrap
   ADMIN_EMAIL: z.string().default(''),
   ADMIN_PASSWORD: z.string().default(''),

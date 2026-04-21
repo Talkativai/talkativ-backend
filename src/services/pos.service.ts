@@ -242,7 +242,6 @@ export const fetchLiveMenuFromSquare = async (
     throw new Error(`Square API error: ${resp.status} — ${errBody}`);
   }
   const data = await resp.json() as { objects?: any[] };
-  console.log('[Square Menu] raw object count:', data.objects?.length ?? 0, 'types:', JSON.stringify([...new Set((data.objects||[]).map((o:any)=>o.type))]));
   const objects = data.objects || [];
 
   const catMap = new Map<string, string>();
