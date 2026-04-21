@@ -82,8 +82,7 @@ export const createPaymentIntent = async (amount: number, currency: string, meta
 };
 
 // ─── Payment Intent via Stripe Connect (destination charge) ──────────────────
-// Money flows: customer → our platform → (minus applicationFeeAmount) → connected account
-// 0.5% platform fee is taken automatically. No change needed to the /pay frontend page.
+// Money flows: customer → directly to connected account. No platform fee taken.
 
 export const createPaymentIntentWithConnect = async (
   amount: number,
@@ -91,12 +90,10 @@ export const createPaymentIntentWithConnect = async (
   metadata: Record<string, string>,
   connectedAccountId: string,
 ) => {
-  const applicationFeeAmount = Math.round(amount * 0.005); // 0.5%
   return stripe.paymentIntents.create({
     amount,
     currency,
     metadata,
-    application_fee_amount: applicationFeeAmount,
     transfer_data: { destination: connectedAccountId },
   });
 };
