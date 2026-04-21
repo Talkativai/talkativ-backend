@@ -21,6 +21,7 @@ router.post('/public/cancel-reservation', webhookLimiter, webhookController.canc
 router.post('/public/update-reservation', webhookLimiter, webhookController.updateReservation);
 router.post('/public/check-hours', webhookLimiter, webhookController.checkHours);
 router.post('/public/check-delivery', webhookLimiter, webhookController.checkDeliveryAddress);
+router.post('/public/confirm-payment', webhookLimiter, webhookController.confirmPayment);
 
 // POS payment return — Square / SumUp redirect here after the customer pays.
 // Uses GET because payment providers redirect browsers via 302.

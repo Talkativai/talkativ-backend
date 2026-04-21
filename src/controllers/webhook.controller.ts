@@ -124,13 +124,13 @@ export const posPaymentReturn = asyncHandler(async (req: Request, res: Response)
   if (type === 'order') {
     record = await prisma.order.findUnique({
       where: { id },
-      include: { business: { include: { integrations: true, notifSettings: true } } },
+      include: { business: { include: { integrations: true, notifSettings: true, user: true } } },
     });
     business = record?.business;
   } else {
     record = await prisma.reservation.findUnique({
       where: { id },
-      include: { business: { include: { integrations: true, notifSettings: true } } },
+      include: { business: { include: { integrations: true, notifSettings: true, user: true } } },
     });
     business = record?.business;
   }
@@ -164,7 +164,10 @@ export const posPaymentReturn = asyncHandler(async (req: Request, res: Response)
     await prisma.order.update({ where: { id }, data: { paymentStatus: 'paid', status: 'CONFIRMED' } });
 
     const amountPaid = Number(record.amount);
+    const currency = business.currency || 'GBP';
+    const symbol = currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : '$';
 
+    // Customer SMS
     if (record.customerPhone && twilioService.isValidPhoneNumber(record.customerPhone)) {
       twilioService.sendSms(
         record.customerPhone,
@@ -172,27 +175,47 @@ export const posPaymentReturn = asyncHandler(async (req: Request, res: Response)
       ).catch(() => {});
     }
 
+    // Customer email
     if (record.customerEmail) {
       emailService.sendOrderPaymentConfirmation(
-        record.customerEmail,
-        record.customerName,
-        business.name,
-        record.id,
-        record.items,
-        amountPaid,
-      ).catch(err => console.error('[Email] Order payment confirm to customer failed:', err));
+        record.customerEmail, record.customerName, business.name, record.id, record.items, amountPaid,
+      ).catch(() => {});
     }
 
-    if (business.email && business.notifSettings?.emailNewOrder !== false) {
+    // Push to KDS if Square/Clover is connected (even for DB-menu orders)
+    const kdsIntegration = business.integrations?.find(
+      (i: any) => ['Square', 'Clover'].includes(i.name) && i.status === 'CONNECTED',
+    );
+    if (kdsIntegration && !record.posOrderId) {
+      try {
+        const parsedItems = posService.parseItemString(record.items);
+        const lineItems: posService.PosLineItem[] = parsedItems.map((p: any) => ({
+          name: p.name, quantity: p.quantity, unitPriceMinor: 0,
+        }));
+        const posResult = await posService.pushOrderToPOS(kdsIntegration, {
+          ourOrderId: record.id, customerName: record.customerName,
+          customerPhone: record.customerPhone, orderType: record.type,
+          deliveryAddress: record.deliveryAddress, notes: record.notes,
+          allergies: record.allergies, lineItems, currency,
+        });
+        if (posResult) await prisma.order.update({ where: { id }, data: { posOrderId: posResult.posOrderId } });
+      } catch (err) { console.error('[KDS] Post-payment push failed:', err); }
+    }
+
+    // Owner email
+    const ownerEmail = business.email || business.user?.email;
+    if (ownerEmail && business.notifSettings?.emailNewOrder !== false) {
       emailService.sendBusinessOrderPaymentReceived(
-        business.email,
-        business.name,
-        record.id,
-        record.customerName,
-        record.customerPhone,
-        record.items,
-        amountPaid,
-      ).catch(err => console.error('[Email] Business order payment alert failed:', err));
+        ownerEmail, business.name, record.id, record.customerName, record.customerPhone, record.items, amountPaid,
+      ).catch(() => {});
+    }
+
+    // Owner SMS (only if no KDS — KDS already alerts the kitchen)
+    if (!kdsIntegration && business.phone && twilioService.isValidPhoneNumber(business.phone)) {
+      twilioService.sendSms(
+        business.phone,
+        `[Talkativ] New order paid — ${record.customerName}, ${symbol}${amountPaid.toFixed(2)}, Order #${id.slice(0, 8)}: ${record.items}`,
+      ).catch(() => {});
     }
 
     return res.redirect(`${env.FRONTEND_URL}/#/payment-success?order_id=${id}`);
@@ -950,44 +973,79 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
   let paymentLink: string | null = null;
   let paymentLinkSent = false;
 
-  // ── Payment routing: Square → SumUp → Stripe Connect → nothing ────────────
-  // Money always goes directly to the business — we are never the payment intermediary.
-  const squareInt  = business.integrations?.find((i: any) => i.name === 'Square'  && i.status === 'CONNECTED');
-  const sumupInt   = business.integrations?.find((i: any) => i.name === 'SumUp'   && i.status === 'CONNECTED');
-  const stripeInt  = business.integrations?.find((i: any) => i.name === 'Stripe'  && i.status === 'CONNECTED');
-  const hasPaymentIntegration = !!(squareInt || sumupInt || stripeInt);
+  // ── Payment routing ─────────────────────────────────────────────────────────
+  // Priority: isPrimary integration first, then Square → Clover → SumUp → Zettle → Stripe
+  const PAYMENT_PROVIDERS = ['Square', 'Clover', 'SumUp', 'Zettle', 'Stripe'];
+  const connectedPaymentIntegrations = business.integrations?.filter(
+    (i: any) => PAYMENT_PROVIDERS.includes(i.name) && i.status === 'CONNECTED'
+  ) || [];
+  const primaryPayInt = connectedPaymentIntegrations.find((i: any) => i.isPrimary)
+    || connectedPaymentIntegrations.sort((a: any, b: any) =>
+        PAYMENT_PROVIDERS.indexOf(a.name) - PAYMENT_PROVIDERS.indexOf(b.name)
+      )[0]
+    || null;
 
-  if (payment_method === 'pay_now' && totalAmount > 0 && customer_phone && hasPaymentIntegration) {
+  if (payment_method === 'pay_now' && totalAmount > 0 && !primaryPayInt) {
+    // No payment integration — refuse the order
+    await prisma.order.delete({ where: { id: order.id } });
+    res.json({ error: true, message: "I'm sorry, we're not set up to take phone payments right now. Please visit us in person or try again later." });
+    return;
+  }
+
+  if (payment_method === 'pay_now' && totalAmount > 0 && customer_phone && primaryPayInt) {
     try {
       const businessCurrency = ((business as any).currency || 'GBP').toUpperCase();
+      const cfg = primaryPayInt.config as any;
+      let providerName = primaryPayInt.name;
 
-      if (squareInt) {
-        const cfg = squareInt.config as any;
-        paymentLink = await paymentProviders.createSquarePaymentLink(
-          cfg, order.id, items, totalAmount, businessCurrency,
+      if (primaryPayInt.name === 'Square') {
+        paymentLink = await paymentProviders.createSquarePaymentLink(cfg, order.id, items, totalAmount, businessCurrency);
+      } else if (primaryPayInt.name === 'Clover') {
+        // Clover doesn't have a hosted payment link — fall through to Stripe if available
+        const fallbackStripe = connectedPaymentIntegrations.find((i: any) => i.name === 'Stripe');
+        if (fallbackStripe) {
+          const sCfg = fallbackStripe.config as any;
+          const pi = await stripeService.createPaymentIntentWithConnect(
+            Math.round(totalAmount * 100), businessCurrency.toLowerCase(),
+            { type: 'order_payment', order_id: order.id, business_id, customer_name }, sCfg.accountId,
+          );
+          await prisma.order.update({ where: { id: order.id }, data: { paymentIntentId: pi.id } });
+          paymentLink = `${env.FRONTEND_URL}/#/pay?pi=${pi.client_secret}&order_id=${order.id}&type=order`;
+          providerName = 'Stripe';
+        }
+      } else if (primaryPayInt.name === 'SumUp') {
+        paymentLink = await paymentProviders.createSumUpCheckout(cfg, order.id, items, totalAmount, businessCurrency);
+      } else if (primaryPayInt.name === 'Zettle') {
+        // Zettle is in-person only — no hosted link; fall through to Stripe
+        const fallbackStripe = connectedPaymentIntegrations.find((i: any) => i.name === 'Stripe');
+        if (fallbackStripe) {
+          const sCfg = fallbackStripe.config as any;
+          const pi = await stripeService.createPaymentIntentWithConnect(
+            Math.round(totalAmount * 100), businessCurrency.toLowerCase(),
+            { type: 'order_payment', order_id: order.id, business_id, customer_name }, sCfg.accountId,
+          );
+          await prisma.order.update({ where: { id: order.id }, data: { paymentIntentId: pi.id } });
+          paymentLink = `${env.FRONTEND_URL}/#/pay?pi=${pi.client_secret}&order_id=${order.id}&type=order`;
+          providerName = 'Stripe';
+        }
+      } else if (primaryPayInt.name === 'Stripe') {
+        const pi = await stripeService.createPaymentIntentWithConnect(
+          Math.round(totalAmount * 100), businessCurrency.toLowerCase(),
+          { type: 'order_payment', order_id: order.id, business_id, customer_name }, cfg.accountId,
         );
-      } else if (sumupInt) {
-        const cfg = sumupInt.config as any;
-        paymentLink = await paymentProviders.createSumUpCheckout(
-          cfg, order.id, items, totalAmount, businessCurrency,
-        );
-      } else if (stripeInt) {
-        // Stripe Connect destination charge — 0.5% platform fee taken automatically
-        const cfg = stripeInt.config as any;
-        const paymentIntent = await stripeService.createPaymentIntentWithConnect(
-          Math.round(totalAmount * 100),
-          businessCurrency.toLowerCase(),
-          { type: 'order_payment', order_id: order.id, business_id, customer_name },
-          cfg.accountId,
-        );
-        await prisma.order.update({ where: { id: order.id }, data: { paymentIntentId: paymentIntent.id } });
-        paymentLink = `${env.FRONTEND_URL}/#/pay?pi=${paymentIntent.client_secret}&order_id=${order.id}&type=order`;
+        await prisma.order.update({ where: { id: order.id }, data: { paymentIntentId: pi.id } });
+        paymentLink = `${env.FRONTEND_URL}/#/pay?pi=${pi.client_secret}&order_id=${order.id}&type=order`;
       }
 
-      if (paymentLink && customer_phone && twilioService.isValidPhoneNumber(customer_phone)) {
-        const smsBody = `Hi ${customer_name}, your order at ${business.name} is confirmed!\n\nTotal: £${totalAmount.toFixed(2)}\nItems: ${items}\n\nPay here: ${paymentLink}`;
-        twilioService.sendSms(customer_phone, smsBody).catch(err => console.error('[SMS] Failed to send payment link:', err));
-        paymentLinkSent = true;
+      if (paymentLink) {
+        await prisma.order.update({ where: { id: order.id }, data: { paymentLinkUrl: paymentLink, paymentProvider: providerName } });
+        if (customer_phone && twilioService.isValidPhoneNumber(customer_phone)) {
+          const currency = (business as any).currency || 'GBP';
+          const symbol = currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : '$';
+          const smsBody = `Hi ${customer_name}, here is your payment link for your order at ${business.name}:\n\nTotal: ${symbol}${totalAmount.toFixed(2)}\nItems: ${items}\n\nPay here: ${paymentLink}`;
+          twilioService.sendSms(customer_phone, smsBody).catch(err => console.error('[SMS] Failed to send payment link:', err));
+          paymentLinkSent = true;
+        }
       }
     } catch (payErr) {
       console.error('[Payment] Failed to create payment link:', payErr);
@@ -1682,4 +1740,108 @@ export const updateReservation = asyncHandler(async (req: Request, res: Response
     deposit_difference: depositDiff > 0 ? depositDiff : undefined,
     deposit_payment_link: depositPaymentLink || undefined,
   });
+});
+
+// ─── Confirm Payment (agent tool) ─────────────────────────────────────────────
+// Called by the agent after the customer says "I've paid". Polls the payment
+// provider to verify, then marks the order confirmed + notifies the business.
+export const confirmPayment = asyncHandler(async (req: Request, res: Response) => {
+  const { business_id, order_id } = req.body;
+
+  if (!business_id || !order_id) {
+    res.json({ confirmed: false, message: 'Missing business_id or order_id.' });
+    return;
+  }
+
+  const order = await prisma.order.findFirst({
+    where: { id: order_id, businessId: business_id },
+    include: { business: { include: { integrations: true, notifSettings: true, user: true } } },
+  });
+
+  if (!order) {
+    res.json({ confirmed: false, message: "I couldn't find that order. Please check the order reference." });
+    return;
+  }
+
+  if (order.paymentStatus === 'paid') {
+    res.json({ confirmed: true, message: 'Payment was already confirmed.' });
+    return;
+  }
+
+  const business = order.business as any;
+  const currency = business.currency || 'GBP';
+  const symbol = currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : '$';
+  const provider = order.paymentProvider;
+  const integration = business.integrations?.find((i: any) => i.name === provider && i.status === 'CONNECTED');
+  const cfg = integration?.config as any;
+
+  let paid = false;
+
+  if (provider === 'Square' && cfg) {
+    paid = await paymentProviders.verifySquarePayment(cfg, order.id);
+  } else if (provider === 'SumUp' && cfg) {
+    paid = await paymentProviders.verifySumUpPayment(cfg, order.id);
+  } else if ((provider === 'Stripe' || provider === 'Clover') && order.paymentIntentId) {
+    // Check Stripe payment intent status
+    try {
+      const pi = await stripe.paymentIntents.retrieve(order.paymentIntentId);
+      paid = pi.status === 'succeeded';
+    } catch { paid = false; }
+  }
+
+  if (!paid) {
+    res.json({ confirmed: false, message: "I can't see a completed payment yet. Please check the link and try again, then let me know once you're done." });
+    return;
+  }
+
+  // Mark order confirmed
+  await prisma.order.update({ where: { id: order.id }, data: { paymentStatus: 'paid', status: 'CONFIRMED' } });
+
+  const amountPaid = Number(order.amount);
+
+  // Customer SMS confirmation
+  if (order.customerPhone && twilioService.isValidPhoneNumber(order.customerPhone)) {
+    twilioService.sendSms(
+      order.customerPhone,
+      `Hi ${order.customerName}, your payment of ${symbol}${amountPaid.toFixed(2)} to ${business.name} is confirmed! Order #${order.id.slice(0, 8)} is being prepared.`,
+    ).catch(() => {});
+  }
+
+  // Push to KDS if Square/Clover is connected
+  const kdsIntegration = business.integrations?.find(
+    (i: any) => ['Square', 'Clover'].includes(i.name) && i.status === 'CONNECTED',
+  );
+  if (kdsIntegration && !order.posOrderId) {
+    try {
+      const parsedItems = posService.parseItemString(order.items);
+      const lineItems: posService.PosLineItem[] = parsedItems.map((p: any) => ({
+        name: p.name, quantity: p.quantity, unitPriceMinor: 0,
+      }));
+      const posResult = await posService.pushOrderToPOS(kdsIntegration, {
+        ourOrderId: order.id, customerName: order.customerName,
+        customerPhone: order.customerPhone, orderType: order.type,
+        deliveryAddress: order.deliveryAddress, notes: order.notes,
+        allergies: order.allergies, lineItems, currency,
+      });
+      if (posResult) await prisma.order.update({ where: { id: order.id }, data: { posOrderId: posResult.posOrderId } });
+    } catch (err) { console.error('[KDS] Post-confirm push failed:', err); }
+  }
+
+  // Owner email notification
+  const ownerEmail = business.email || business.user?.email;
+  if (ownerEmail && business.notifSettings?.emailNewOrder !== false) {
+    emailService.sendBusinessOrderPaymentReceived(
+      ownerEmail, business.name, order.id, order.customerName, order.customerPhone, order.items, amountPaid,
+    ).catch(() => {});
+  }
+
+  // Owner SMS (only if no KDS)
+  if (!kdsIntegration && business.phone && twilioService.isValidPhoneNumber(business.phone)) {
+    twilioService.sendSms(
+      business.phone,
+      `[Talkativ] New order paid — ${order.customerName}, ${symbol}${amountPaid.toFixed(2)}, Order #${order.id.slice(0, 8)}: ${order.items}`,
+    ).catch(() => {});
+  }
+
+  res.json({ confirmed: true, message: `Payment confirmed! Your order is all set. A confirmation message has been sent to your phone.` });
 });

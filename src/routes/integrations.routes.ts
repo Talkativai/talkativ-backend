@@ -24,6 +24,7 @@ router.get('/clover/connect', integrationsController.cloverConnectInit);
 router.get('/sumup/connect', integrationsController.sumupConnectInit);
 
 router.delete('/:id/disconnect', integrationsController.disconnectIntegration);
+router.put('/:id/set-primary', integrationsController.setPrimaryIntegration);
 router.get('/:id/status', integrationsController.getIntegrationStatus);
 
 export default router;

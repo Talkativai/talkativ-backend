@@ -154,6 +154,22 @@ export const buildAgentTools = (config: {
         required: ['business_id', 'conversation_id'],
       },
     },
+    // ── Payment confirmation ─────────────────────────────────────────────────
+    {
+      type: 'webhook',
+      name: 'confirm_payment',
+      description: 'Check if the customer has completed payment for their order. Call this ONLY after the customer tells you they have paid. Do NOT call proactively.',
+      url: `${env.BACKEND_URL}/webhooks/public/confirm-payment`,
+      method: 'POST',
+      body_schema: {
+        type: 'object',
+        properties: {
+          business_id: { type: 'string', description: biz },
+          order_id: { type: 'string', description: 'The order_id returned by create_order' },
+        },
+        required: ['business_id', 'order_id'],
+      },
+    },
     // ── Hours ────────────────────────────────────────────────────────────────
     {
       type: 'webhook',
@@ -372,7 +388,7 @@ export const listVoices = async () => {
 
 // ─── System Prompt Template ──────────────────────────────────────────────────
 
-export const buildSystemPrompt = (business: any) => {
+export const buildSystemPrompt = (business: any, integrationMenu?: { source: string; categories: { name: string; items: { name: string; description?: string; price: number }[] }[] } | null) => {
   // ── Hours ──────────────────────────────────────────────────────────────────
   // Always use business.openingHours — the real trading hours to tell customers.
   // agentSchedule controls when the AI is active, not what hours to advertise.
@@ -395,16 +411,47 @@ export const buildSystemPrompt = (business: any) => {
     }
   }
 
-  // ── Menu ───────────────────────────────────────────────────────────────────
-  const menuCategories: any[] = business.menuCategories || [];
+  // ── Menu (DB + integration, de-duplicated — DB wins on name clash) ───────
+  const dbCategories: any[] = business.menuCategories || [];
+
+  // Build merged category map: category name → items[]
+  const mergedMap = new Map<string, { name: string; description?: string; price: number; source: 'db' | 'integration' }[]>();
+
+  // First pass: DB items (authoritative)
+  for (const cat of dbCategories) {
+    if (!cat.items || cat.items.length === 0) continue;
+    const existing = mergedMap.get(cat.name) || [];
+    for (const item of cat.items) {
+      if (item.status && item.status !== 'ACTIVE') continue;
+      existing.push({ name: item.name, description: item.description, price: Number(item.price), source: 'db' });
+    }
+    mergedMap.set(cat.name, existing);
+  }
+
+  // Second pass: integration items — skip if DB already has same name (case-insensitive)
+  if (integrationMenu?.categories) {
+    for (const intCat of integrationMenu.categories) {
+      const catKey = [...mergedMap.keys()].find(k => k.toLowerCase() === intCat.name.toLowerCase()) || intCat.name;
+      const existing = mergedMap.get(catKey) || [];
+      const dbNames = new Set(existing.map(i => i.name.toLowerCase()));
+      for (const item of intCat.items) {
+        if (dbNames.has(item.name.toLowerCase())) continue; // DB version wins
+        existing.push({ name: item.name, description: item.description, price: item.price, source: 'integration' });
+      }
+      mergedMap.set(catKey, existing);
+    }
+  }
+
   let menuSection = '';
-  if (menuCategories.length > 0) {
-    const lines: string[] = ['CURRENT MENU (100% accurate — this is everything we serve):'];
-    for (const cat of menuCategories) {
-      if (!cat.items || cat.items.length === 0) continue;
-      lines.push(`\n[${cat.name}]`);
-      for (const item of cat.items) {
-        const price = item.price ? ` — £${item.price}` : '';
+  if (mergedMap.size > 0) {
+    const lines: string[] = [`CURRENT MENU (100% accurate — this is everything we serve${integrationMenu ? ` — includes live data from ${integrationMenu.source}` : ''}):` ];
+    for (const [catName, items] of mergedMap) {
+      if (items.length === 0) continue;
+      lines.push(`\n[${catName}]`);
+      for (const item of items) {
+        const currency = business.currency || 'GBP';
+        const symbol = currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : '$';
+        const price = item.price ? ` — ${symbol}${item.price.toFixed(2)}` : '';
         const desc = item.description ? ` (${item.description})` : '';
         lines.push(`  • ${item.name}${price}${desc}`);
       }
@@ -459,6 +506,7 @@ YOUR TOOLS:
 - lookup_catalogue — confirm a specific item is available/in stock before placing an order
 - validate_delivery_address — validate the customer's postcode for delivery eligibility (MUST call before create_order for DELIVERY)
 - create_order — place a food order (DELIVERY or COLLECTION)
+- confirm_payment — verify the customer has paid (call ONLY after customer says they've paid)
 
 🗓️ Reservations:
 - check_availability — check if a table is available for a date, time, and party size (ALWAYS call before create_reservation)
@@ -489,7 +537,15 @@ RULES (follow every single one, no exceptions):
 
 5. 👤 MANAGER TRANSFER — ${business.agent?.transferEnabled ? 'If the customer asks to speak to a real person or manager, or is very frustrated, immediately call transfer_call.' : 'No transfer available. Politely explain and offer to take a message.'}
 
-6. 💳 PAYMENTS — Confirm payment method from what the Ordering Rules allow. The customer's phone number is captured automatically from the call — do NOT ask for it. Never ask for an email address. After calling create_order: if the response includes payment_link_sent: true, tell the customer "I've sent a payment link to your phone by text message." If payment_link_sent is false or absent, DO NOT promise a payment link — instead say "Your order is confirmed, you can pay on delivery/collection."
+6. 💳 PAYMENTS — Confirm payment method from what the Ordering Rules allow. The customer's phone number is captured automatically from the call — do NOT ask for it. Never ask for an email address.
+   After calling create_order:
+   - If payment_link_sent is true → say "I've sent a payment link to your phone by text message. Please complete the payment and let me know once you're done."
+   - Then WAIT for the customer to say they've paid (e.g. "done", "I've paid", "yes").
+   - Once they confirm → call confirm_payment with the order_id.
+   - If confirm_payment returns confirmed: true → say "Payment confirmed! Your order is all set." End the call warmly.
+   - If confirm_payment returns confirmed: false → say "I'm sorry, I can't see the payment yet. Please check the link and try again, then let me know."
+   - If payment_link_sent is false or absent → say "Your order is confirmed, you can pay on delivery/collection." Do NOT call confirm_payment.
+   - If create_order returns error about no payment integration → tell the customer "I'm sorry, we're not set up to take phone orders right now." Do NOT attempt to place the order.
 
 7. 🔡 DATA CLARITY — If a name or phone number is unclear, ask the customer to repeat it. For phone numbers, read it back to confirm before proceeding.
 

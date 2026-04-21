@@ -251,6 +251,8 @@ model Order {
   paymentStatus   String?     @default("pending")
   deliveryAddress String?
   posOrderId      String?
+  paymentLinkUrl  String?
+  paymentProvider String?
   business        Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
   call            Call?       @relation(fields: [callId], references: [id])
 
@@ -322,6 +324,7 @@ model Integration {
   status     IntegrationStatus @default(AVAILABLE)
   config     Json?
   lastSynced DateTime?
+  isPrimary  Boolean           @default(false)
   createdAt  DateTime          @default(now())
   updatedAt  DateTime          @updatedAt
   business   Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)

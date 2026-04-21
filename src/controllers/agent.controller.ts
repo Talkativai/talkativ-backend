@@ -232,31 +232,20 @@ export const autoSyncAgent = async (businessId: string): Promise<number> => {
     throw new Error('Agent not configured');
   }
 
-  // Merge integration menu items into DB categories (integration items are read-only additions)
-  let menuCategories: any[] = [...dbMenuCategories];
+  // Fetch live integration menu (Square/Clover) to pass alongside DB menu
+  let integrationMenuData: import('../services/pos.service.js').IntegrationMenuResult | null = null;
   if (orderingIntegration?.config) {
     try {
       const cfg = orderingIntegration.config as Record<string, string>;
-      const integrationMenu = orderingIntegration.name === 'Square'
+      integrationMenuData = orderingIntegration.name === 'Square'
         ? await posService.fetchLiveMenuFromSquare({ accessToken: cfg.accessToken, locationId: cfg.locationId })
         : await posService.fetchLiveMenuFromClover({ accessToken: cfg.accessToken, merchantId: cfg.merchantId });
-
-      for (const intCat of integrationMenu.categories) {
-        const existing = menuCategories.find(c => c.name.toLowerCase() === intCat.name.toLowerCase());
-        if (existing) {
-          // Merge — add integration items not already in this category
-          const existingNames = new Set(existing.items.map((i: any) => i.name.toLowerCase()));
-          const newItems = intCat.items.filter(i => !existingNames.has(i.name.toLowerCase()));
-          existing.items = [...existing.items, ...newItems];
-        } else {
-          menuCategories.push({ name: intCat.name, items: intCat.items });
-        }
-      }
     } catch (err: any) {
       console.error('[AutoSync] Integration menu fetch failed (non-fatal):', err.message);
     }
   }
 
+  // buildSystemPrompt handles de-duplication — DB items always win on name clash
   const systemPrompt = elevenlabs.buildSystemPrompt({
     name: business.name,
     type: business.type,
@@ -264,7 +253,8 @@ export const autoSyncAgent = async (businessId: string): Promise<number> => {
     openingHours: business.openingHours,
     agentName: agent.name,
     greeting: agent.openingGreeting,
-    menuCategories,
+    currency: (business as any).currency,
+    menuCategories: dbMenuCategories,
     faqs,
     orderingPolicy,
     reservationPolicy,
@@ -273,7 +263,7 @@ export const autoSyncAgent = async (businessId: string): Promise<number> => {
       transferNumber: agent.transferNumber ?? undefined,
       openingGreeting: agent.openingGreeting,
     },
-  });
+  }, integrationMenuData);
 
   const tools = elevenlabs.buildAgentTools({
     businessId,
@@ -295,7 +285,7 @@ export const autoSyncAgent = async (businessId: string): Promise<number> => {
   // Save in DB so we have a record
   await prisma.agent.update({ where: { businessId }, data: { systemPrompt } });
 
-  return menuCategories.reduce((n, c) => n + c.items.length, 0);
+  return dbMenuCategories.reduce((n: number, c: any) => n + c.items.length, 0);
 };
 
 // ─── Sync Calls from ElevenLabs ──────────────────────────────────────────────

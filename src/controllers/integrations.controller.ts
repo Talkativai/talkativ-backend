@@ -236,6 +236,35 @@ export const stripeConnectCallback = asyncHandler(async (req: Request, res: Resp
   }
 });
 
+// ─── Set primary payment integration ─────────────────────────────────────────
+
+export const setPrimaryIntegration = asyncHandler(async (req: Request, res: Response) => {
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
+
+  const integration = await prisma.integration.findFirst({ where: { id: req.params.id, businessId, status: 'CONNECTED' } });
+  if (!integration) throw ApiError.notFound('Integration not found');
+
+  // Clear primary flag from all payment integrations for this business
+  await prisma.integration.updateMany({
+    where: { businessId, category: 'ordering' },
+    data: { isPrimary: false },
+  });
+  // Also clear Stripe Connect (payment category)
+  await prisma.integration.updateMany({
+    where: { businessId, name: 'Stripe' },
+    data: { isPrimary: false },
+  });
+
+  // Set this one as primary
+  const updated = await prisma.integration.update({
+    where: { id: req.params.id },
+    data: { isPrimary: true },
+  });
+
+  res.json(updated);
+});
+
 // ─── Shared OAuth state helpers ──────────────────────────────────────────────
 
 function buildOAuthState(businessId: string): string {
