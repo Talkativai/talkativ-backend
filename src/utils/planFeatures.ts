@@ -15,4 +15,4 @@ export function getPlanFeatures(plan: string): PlanFeatures {
 
 // Integrations restricted to Pro+ plans
 export const PRO_ONLY_POS = ['Square', 'Clover', 'Zettle'];
-export const PRO_ONLY_RESERVATION = ['resOS', 'ResDiary'];
+export const PRO_ONLY_RESERVATION = ['resOS', 'ResDiary', 'OpenTable', 'Collins'];
