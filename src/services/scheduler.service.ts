@@ -42,6 +42,23 @@ export async function sendReservationReminders(): Promise<void> {
   }
 }
 
+// ─── Monthly call count reset ─────────────────────────────────────────────────
+// Resets callsThisMonth for any subscription whose callsResetAt has passed.
+
+export async function resetMonthlyCallCounts(): Promise<void> {
+  const now = new Date();
+  const result = await prisma.subscription.updateMany({
+    where: { callsResetAt: { lte: now } },
+    data: {
+      callsThisMonth: 0,
+      callsResetAt: new Date(now.getFullYear(), now.getMonth() + 1, 1),
+    },
+  });
+  if (result.count > 0) {
+    console.log(`[Scheduler] Reset call counts for ${result.count} subscription(s)`);
+  }
+}
+
 // ─── Scheduler entry point ────────────────────────────────────────────────────
 // Call this once at server startup; it loops every hour indefinitely.
 
@@ -52,10 +69,13 @@ export function startScheduler(): void {
     sendReservationReminders().catch(err =>
       console.error('[Scheduler] sendReservationReminders error:', err),
     );
+    resetMonthlyCallCounts().catch(err =>
+      console.error('[Scheduler] resetMonthlyCallCounts error:', err),
+    );
   };
 
   // Run once immediately on startup, then every hour
   tick();
   setInterval(tick, HOUR_MS);
-  console.log('[Scheduler] Reservation reminder scheduler started (every 1h)');
+  console.log('[Scheduler] Started (reservation reminders + call count reset, every 1h)');
 }

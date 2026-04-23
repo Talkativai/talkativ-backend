@@ -12,6 +12,7 @@ import * as resosService from '../services/resos.service.js';
 import crypto from 'crypto';
 import * as paymentProviders from '../services/payment-providers.service.js';
 import * as elevenlabsService from '../services/elevenlabs.service.js';
+import { getPlanFeatures } from '../utils/planFeatures.js';
 
 // ─── Helper: push reservation to whichever platform is connected ─────────────
 
@@ -347,11 +348,52 @@ export const elevenlabsWebhook = asyncHandler(async (req: Request, res: Response
       }
     }
 
-    // ElevenLabs expects a specific response for conversation_initiation_client_data
-    // (dynamic variables / config overrides). Return empty overrides — agent uses its defaults.
+    // ElevenLabs expects a specific response for conversation_initiation_client_data.
+    // Use it to enforce call volume limits per plan.
     if (eventType === 'conversation_initiation_client_data') {
+      if (businessId) {
+        const sub = await prisma.subscription.findUnique({
+          where: { businessId },
+          select: { plan: true, callsThisMonth: true, callsResetAt: true },
+        });
+        if (sub) {
+          const features = getPlanFeatures(sub.plan);
+          if (isFinite(features.callsPerMonth) && sub.callsThisMonth >= features.callsPerMonth) {
+            // Over limit — instruct agent to apologise and end the call
+            res.json({
+              conversation_config_override: {
+                agent: {
+                  prompt: {
+                    prompt: 'You have reached the end of your available calls for this month. Politely inform the caller that this business is temporarily unable to take calls and to try again next month, then end the conversation.',
+                  },
+                  first_message: "Thank you for calling. Unfortunately we're unable to take calls at the moment. Please try again soon — apologies for the inconvenience.",
+                },
+              },
+            });
+            return;
+          }
+        }
+      }
       res.json({});
       return;
+    }
+
+    // Increment callsThisMonth after a live call record is created
+    if (businessId) {
+      const now = new Date();
+      const sub = await prisma.subscription.findUnique({
+        where: { businessId },
+        select: { id: true, callsResetAt: true },
+      });
+      if (sub) {
+        const needsReset = !sub.callsResetAt || sub.callsResetAt <= now;
+        await prisma.subscription.update({
+          where: { businessId },
+          data: needsReset
+            ? { callsThisMonth: 1, callsResetAt: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1) }
+            : { callsThisMonth: { increment: 1 } },
+        });
+      }
     }
 
   } else if (eventType === 'post_call_transcription' || eventType === 'conversation_ended') {

@@ -19,8 +19,8 @@ export const ALLOWED_FILE_TYPES = ['application/pdf', 'application/vnd.openxmlfo
 
 // ─── Stripe Plans ────────────────────────────────────────────────────────────
 export const PLAN_PRICES = {
-  STARTER: 19900, // £199 in pence
-  GROWTH: 39900,  // £399 in pence
+  GROWTH: 9900,  // £99 in pence
+  PRO: 17900,    // £179 in pence
 } as const;
 
 // ─── ElevenLabs Voices ───────────────────────────────────────────────────────

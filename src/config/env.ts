@@ -59,9 +59,9 @@ const envSchema = z.object({
   // Support ticket destination email
   SUPPORT_EMAIL: z.string().default('support@talkativ.com'),
 
-  // Stripe price IDs
-  STRIPE_STARTER_PRICE_ID: z.string().default(''),
+  // Stripe price IDs (Growth = £99/mo, Pro = £179/mo)
   STRIPE_GROWTH_PRICE_ID: z.string().default(''),
+  STRIPE_PRO_PRICE_ID: z.string().default(''),
 
   // POS environments
   SQUARE_ENVIRONMENT: z.enum(['sandbox', 'production']).default('sandbox'),

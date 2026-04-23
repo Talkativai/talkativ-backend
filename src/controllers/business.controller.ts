@@ -175,11 +175,13 @@ export const completeOnboarding = asyncHandler(async (req: Request, res: Respons
     const user = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { email: true, firstName: true } });
     const agentRecord = await prisma.agent.findUnique({ where: { businessId: business.id }, select: { name: true } });
     if (user) {
+      const subRecord = await prisma.subscription.findUnique({ where: { businessId: business.id }, select: { plan: true } });
       emailService.sendOnboardingCompleteEmail(
         user.email,
         user.firstName || 'there',
         agentRecord?.name || 'your agent',
         updated.name,
+        subRecord?.plan ?? 'GROWTH',
       ).catch(() => {});
     }
   } catch {}

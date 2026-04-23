@@ -439,8 +439,47 @@ export const sendIncompleteOnboardingReminder = async (to: string, firstName: st
 };
 
 // ─── Onboarding Complete / Welcome to Dashboard ───────────────────────────────
-export const sendOnboardingCompleteEmail = async (to: string, firstName: string, agentName: string, businessName: string) => {
+export const sendOnboardingCompleteEmail = async (
+  to: string,
+  firstName: string,
+  agentName: string,
+  businessName: string,
+  plan: string = 'GROWTH',
+) => {
   const dashUrl = `${env.FRONTEND_URL}/#/dashboard`;
+  const isPro = plan === 'PRO' || plan === 'ENTERPRISE';
+
+  const paymentSection = isPro
+    ? `<div style="background:#fef3ff;border:1.5px solid #e9d5ff;border-radius:14px;padding:24px;margin-bottom:24px;">
+            <div style="font-size:12px;font-weight:700;color:#6b21a8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">💳 Connect a payment method</div>
+            <p style="font-size:14px;color:#581c87;line-height:1.6;margin:0 0 12px;">
+              To accept "Pay Now" orders over the phone, connect one of the following in <strong>Dashboard → Integrations</strong>:
+            </p>
+            <div style="font-size:13.5px;color:#581c87;line-height:1.9;">
+              🟦 <strong>Square</strong> — most popular in the UK, free to start<br/>
+              🟠 <strong>SumUp</strong> — great for takeaways and small restaurants<br/>
+              🍀 <strong>Clover</strong> — full POS with payment links<br/>
+              💳 <strong>Zettle by PayPal</strong> — popular with independent restaurants<br/>
+              💳 <strong>Stripe</strong> — connect your existing Stripe account directly<br/>
+            </div>
+            <p style="font-size:13px;color:#7e22ce;line-height:1.5;margin:12px 0 0;">
+              Customers pay directly into your account — Talkativ never holds your money.
+            </p>
+          </div>`
+    : `<div style="background:#fef3ff;border:1.5px solid #e9d5ff;border-radius:14px;padding:24px;margin-bottom:24px;">
+            <div style="font-size:12px;font-weight:700;color:#6b21a8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">💳 Connect a payment method</div>
+            <p style="font-size:14px;color:#581c87;line-height:1.6;margin:0 0 12px;">
+              Your Growth plan includes <strong>SumUp</strong> and <strong>Stripe Connect</strong> for phone payments. Connect them in <strong>Dashboard → Integrations</strong>:
+            </p>
+            <div style="font-size:13.5px;color:#581c87;line-height:1.9;">
+              🟠 <strong>SumUp</strong> — great for takeaways and small restaurants<br/>
+              💳 <strong>Stripe</strong> — connect your existing Stripe account directly<br/>
+            </div>
+            <p style="font-size:13px;color:#7e22ce;line-height:1.5;margin:12px 0 0;">
+              Need Square, Clover, or Zettle? Upgrade to the <strong>Pro plan</strong> in Dashboard → Billing.
+            </p>
+          </div>`;
+
   return resend.emails.send({
     from,
     to: [to],
@@ -463,34 +502,21 @@ export const sendOnboardingCompleteEmail = async (to: string, firstName: string,
               📋 Read out your full menu and prices<br/>
               🕐 Tell customers your opening hours<br/>
               ❓ Answer FAQs from your dashboard<br/>
+              🛒 Take orders and book reservations<br/>
               👤 Transfer calls to you or a manager on request
             </div>
           </div>
           <div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:14px;padding:24px;margin-bottom:24px;">
             <div style="font-size:12px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">⚙️ Two more steps before you go live</div>
             <p style="font-size:14px;color:#78350f;line-height:1.6;margin:0 0 10px;">
-              Before ${agentName} can take orders or book tables, do these two things in the dashboard:
+              Before ${agentName} can take orders or book tables, do these in the dashboard:
             </p>
             <div style="font-size:13.5px;color:#78350f;line-height:1.9;">
               📦 <strong>Settings → Ordering</strong> — enable delivery/collection, fees, payment methods<br/>
               📅 <strong>Settings → Reservations</strong> — party size, lead time, deposit rules
             </div>
           </div>
-          <div style="background:#fef3ff;border:1.5px solid #e9d5ff;border-radius:14px;padding:24px;margin-bottom:24px;">
-            <div style="font-size:12px;font-weight:700;color:#6b21a8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">💳 Connect a payment method to accept "Pay Now" orders</div>
-            <p style="font-size:14px;color:#581c87;line-height:1.6;margin:0 0 12px;">
-              Without a payment integration, ${agentName} can only accept <strong>pay on delivery / pay on collection</strong> orders. To let customers pay instantly over the phone, connect one of the following in <strong>Dashboard → Integrations</strong>:
-            </p>
-            <div style="font-size:13.5px;color:#581c87;line-height:1.9;">
-              🟦 <strong>Square</strong> — most popular in the UK, free to start<br/>
-              🟠 <strong>SumUp</strong> — great for takeaways and small restaurants<br/>
-              🍀 <strong>Clover</strong> — full POS with payment links<br/>
-              💳 <strong>Stripe</strong> — connect your existing Stripe account directly<br/>
-            </div>
-            <p style="font-size:13px;color:#7e22ce;line-height:1.5;margin:12px 0 0;">
-              Customers will pay directly into your account — Talkativ never holds your money.
-            </p>
-          </div>
+          ${paymentSection}
           <div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:14px;padding:20px 24px;margin-bottom:28px;">
             <div style="font-size:12px;font-weight:700;color:#166534;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">🚀 Dashboard walkthrough</div>
             <div style="font-size:13.5px;color:#15803d;line-height:1.9;">

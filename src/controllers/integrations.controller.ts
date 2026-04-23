@@ -6,6 +6,21 @@ import { Prisma } from '@prisma/client';
 import stripe from '../config/stripe.js';
 import { env } from '../config/env.js';
 import crypto from 'crypto';
+import { getPlanFeatures, PRO_ONLY_POS, PRO_ONLY_RESERVATION } from '../utils/planFeatures.js';
+
+// ─── Plan gating helper ───────────────────────────────────────────────────────
+async function assertPlanAllows(businessId: string, integrationName: string): Promise<void> {
+  const sub = await prisma.subscription.findUnique({ where: { businessId }, select: { plan: true } });
+  const plan = sub?.plan ?? 'GROWTH';
+  const features = getPlanFeatures(plan);
+
+  if (PRO_ONLY_POS.includes(integrationName) && !features.fullPosIntegrations) {
+    throw ApiError.forbidden(`${integrationName} is only available on the Pro plan or above. Upgrade in Dashboard → Billing.`);
+  }
+  if (PRO_ONLY_RESERVATION.includes(integrationName) && !features.reservationPlatforms) {
+    throw ApiError.forbidden(`${integrationName} is only available on the Pro plan or above. Upgrade in Dashboard → Billing.`);
+  }
+}
 
 // ─── Credential verification helpers ─────────────────────────────────────────
 
@@ -111,6 +126,8 @@ export const connectIntegration = asyncHandler(async (req: Request, res: Respons
   if (!businessId) throw ApiError.notFound('Business not found');
   const { name, category, config } = req.body as { name: string; category: string; config?: Record<string, string> };
   if (!name || !category) throw ApiError.badRequest('name and category are required');
+
+  await assertPlanAllows(businessId, name);
 
   const verifier = VERIFIERS[name];
   if (verifier && config && Object.keys(config).length > 0) {
@@ -289,6 +306,7 @@ export const squareConnectInit = asyncHandler(async (req: Request, res: Response
   if (!env.SQUARE_CLIENT_ID) throw ApiError.badRequest('Square OAuth is not configured on this platform.');
   const businessId = req.user!.businessId;
   if (!businessId) throw ApiError.notFound('Business not found');
+  await assertPlanAllows(businessId, 'Square');
 
   const state = buildOAuthState(businessId);
   const squareBase = env.SQUARE_ENVIRONMENT === 'production'
@@ -370,6 +388,7 @@ export const cloverConnectInit = asyncHandler(async (req: Request, res: Response
   if (!env.CLOVER_APP_ID) throw ApiError.badRequest('Clover OAuth is not configured on this platform.');
   const businessId = req.user!.businessId;
   if (!businessId) throw ApiError.notFound('Business not found');
+  await assertPlanAllows(businessId, 'Clover');
 
   const state = buildOAuthState(businessId);
   const cloverBase = env.CLOVER_ENVIRONMENT === 'production'
@@ -510,6 +529,7 @@ export const zettleConnectInit = asyncHandler(async (req: Request, res: Response
   if (!env.ZETTLE_CLIENT_ID) throw ApiError.badRequest('Zettle OAuth is not configured on this platform.');
   const businessId = req.user!.businessId;
   if (!businessId) throw ApiError.notFound('Business not found');
+  await assertPlanAllows(businessId, 'Zettle');
 
   const state = buildOAuthState(businessId);
   const params = new URLSearchParams({

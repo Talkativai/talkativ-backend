@@ -258,7 +258,7 @@ export const attachTestCard = asyncHandler(async (req: Request, res: Response) =
     update: {
       stripeCustomerId: customerId,
       stripeSubscriptionId: stripeSubId,
-      plan: (plan || 'STARTER').toUpperCase() as any,
+      plan: (plan || 'GROWTH').toUpperCase() as any,
       status: 'TRIALING',
       trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
       cardBrand,
@@ -268,7 +268,7 @@ export const attachTestCard = asyncHandler(async (req: Request, res: Response) =
       businessId,
       stripeCustomerId: customerId,
       stripeSubscriptionId: stripeSubId,
-      plan: (plan || 'STARTER').toUpperCase() as any,
+      plan: (plan || 'GROWTH').toUpperCase() as any,
       status: 'TRIALING',
       trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
       cardBrand,
