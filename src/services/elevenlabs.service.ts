@@ -170,6 +170,40 @@ export const buildAgentTools = (config: {
         required: ['business_id', 'order_id'],
       },
     },
+    // ── Upselling ────────────────────────────────────────────────────────────
+    {
+      type: 'webhook',
+      name: 'get_upsell_suggestions',
+      description: 'Get contextual upsell suggestions based on what the customer has already ordered. Call this after the customer has chosen their main items but before finalising. Naturally weave suggestions into conversation — never push hard.',
+      url: `${env.BACKEND_URL}/webhooks/public/upsell-suggestions`,
+      method: 'POST',
+      body_schema: {
+        type: 'object',
+        properties: {
+          business_id: { type: 'string', description: biz },
+          ordered_items: { type: 'string', description: 'Comma-separated list of items already chosen by the customer' },
+          order_type: { type: 'string', enum: ['DELIVERY', 'COLLECTION'], description: 'Whether this is delivery or collection' },
+          party_size: { type: 'number', description: 'Number of people ordering (default 1 if unknown)' },
+        },
+        required: ['business_id', 'ordered_items'],
+      },
+    },
+    // ── Repeat caller recognition ────────────────────────────────────────────
+    {
+      type: 'webhook',
+      name: 'check_caller_history',
+      description: "Check if this caller has ordered or booked with us before. Call this at the very start of any ordering or reservation call to personalise the interaction. If they're a returning customer, greet them by name and reference their last visit.",
+      url: `${env.BACKEND_URL}/webhooks/public/caller-history`,
+      method: 'POST',
+      body_schema: {
+        type: 'object',
+        properties: {
+          business_id: { type: 'string', description: biz },
+          conversation_id: { type: 'string', description: 'Always send EXACTLY the current conversation_id so the backend can auto-detect the caller\'s phone number' },
+        },
+        required: ['business_id', 'conversation_id'],
+      },
+    },
     // ── Hours ────────────────────────────────────────────────────────────────
     {
       type: 'webhook',
@@ -189,9 +223,25 @@ export const buildAgentTools = (config: {
 
   if (config.transferEnabled && config.transferNumber) {
     tools.push({
+      type: 'webhook',
+      name: 'notify_transfer',
+      description: 'MUST be called BEFORE transfer_call. Alerts the business owner by SMS that a caller is being transferred. Always call this first, then immediately call transfer_call.',
+      url: `${env.BACKEND_URL}/webhooks/public/notify-transfer`,
+      method: 'POST',
+      body_schema: {
+        type: 'object',
+        properties: {
+          business_id: { type: 'string', description: biz },
+          conversation_id: { type: 'string', description: 'Always send EXACTLY the current conversation_id' },
+          reason: { type: 'string', description: 'Brief reason for the transfer e.g. "customer requested human" or "customer unhappy about order"' },
+        },
+        required: ['business_id', 'conversation_id', 'reason'],
+      },
+    });
+    tools.push({
       type: 'system',
       name: 'transfer_call',
-      description: 'Transfer the call to a human manager.',
+      description: 'Transfer the call to a human. ALWAYS call notify_transfer first before calling this.',
       system_tool_mapping: { type: 'transfer_call', number: config.transferNumber },
     });
   }
@@ -503,12 +553,15 @@ ${resRules}
 ${faqs ? `❓ FAQs:\n${faqs}\n\n---` : ''}
 YOUR TOOLS:
 🛒 Ordering:
+- check_caller_history — check if this is a returning customer (call at the START of ordering/reservation calls)
 - lookup_catalogue — confirm a specific item is available/in stock before placing an order
 - validate_delivery_address — validate the customer's postcode for delivery eligibility (MUST call before create_order for DELIVERY)
 - create_order — place a food order (DELIVERY or COLLECTION)
+- get_upsell_suggestions — get contextual add-on suggestions after the customer has chosen their main items
 - confirm_payment — verify the customer has paid (call ONLY after customer says they've paid)
 
 🗓️ Reservations:
+- check_caller_history — check if this is a returning customer (call at the START of ordering/reservation calls)
 - check_availability — check if a table is available for a date, time, and party size (ALWAYS call before create_reservation)
 - create_reservation — book a table (only after check_availability confirms the slot is free)
 - get_reservation — look up an existing reservation by TLK reference or phone number (ALWAYS call before cancel or update)
@@ -517,7 +570,7 @@ YOUR TOOLS:
 
 🕐 General:
 - check_hours — get the restaurant's opening hours for any day
-${business.agent?.transferEnabled ? '- transfer_call — transfer the call to a human manager' : ''}
+${business.agent?.transferEnabled ? '- notify_transfer — alert the business owner by SMS before transferring (ALWAYS call this first)\n- transfer_call — transfer the call to a human manager (ALWAYS call notify_transfer before this)' : ''}
 
 RULES (follow every single one, no exceptions):
 
@@ -549,11 +602,27 @@ RULES (follow every single one, no exceptions):
 
 7. 🔡 DATA CLARITY — If a name or phone number is unclear, ask the customer to repeat it. For phone numbers, read it back to confirm before proceeding.
 
+7b. 👤 RETURNING CUSTOMER — At the very start of any ordering or reservation call, call check_caller_history.
+   - If it returns a returning customer: greet them by name ("Welcome back, [name]!") and optionally reference their last order/visit naturally.
+   - If it returns a new caller or no history: continue normally without mentioning it.
+   - NEVER ask the customer for their phone number — it is captured automatically.
+
+7c. 🛍️ UPSELLING — After the customer has chosen their main items but BEFORE calling create_order, call get_upsell_suggestions.
+   - If it returns suggestions: naturally offer ONE suggestion only ("Would you also like [suggestion]? It goes really well with that.")
+   - If the customer says yes, add it to the items. If no, accept gracefully and proceed.
+   - NEVER pressure the customer. One suggestion, one time.
+
 8. 🤫 SILENT TOOLS — Your tool calls and any internal reasoning are completely invisible to the customer. NEVER output text like "(Thinking: ...)", "(Calling tool...)", "[Tool call: ...]", or ANY text in parentheses or brackets that describes what you are doing internally. Do not narrate tool usage. Use only natural speech like "Let me check that for you" or "One moment."
 
 9. ⏳ FILLER PHRASES — When calling a tool (e.g. validating an address), say a quick filler first so the caller doesn't wait in silence. E.g. "Let me just check that address for you."
 
 10. 📵 CALL ENDING — If the customer hasn't spoken for 10 seconds, ask "Are you still there?" If still no response after 5 more seconds, say a warm goodbye and end the call. Don't keep calls open unnecessarily.
+
+${business.agent?.transferEnabled ? `11. 📞 HUMAN TRANSFER — If the customer asks to speak to a real person, a manager, or a human, OR if they are clearly frustrated and you cannot resolve their issue:
+   a. Say: "Of course, let me transfer you now — one moment please."
+   b. Call notify_transfer with a brief reason.
+   c. Immediately after notify_transfer returns, call transfer_call.
+   d. NEVER call transfer_call without calling notify_transfer first.` : ''}
 
 ── RESERVATION WORKFLOW RULES ────────────────────────────────────────────────
 

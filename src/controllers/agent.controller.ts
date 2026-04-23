@@ -225,7 +225,7 @@ export const autoSyncAgent = async (businessId: string): Promise<number> => {
     prisma.faq.findMany({ where: { businessId }, orderBy: { position: 'asc' } }),
     prisma.orderingPolicy.findUnique({ where: { businessId } }),
     prisma.reservationPolicy.findUnique({ where: { businessId } }),
-    prisma.integration.findFirst({ where: { businessId, name: { in: ['Square', 'Clover'] }, status: 'CONNECTED' } }),
+    prisma.integration.findFirst({ where: { businessId, name: { in: ['Square', 'Clover', 'Zettle'] }, status: 'CONNECTED' } }),
   ]);
 
   if (!business || !agent?.elevenlabsAgentId) {
@@ -237,9 +237,13 @@ export const autoSyncAgent = async (businessId: string): Promise<number> => {
   if (orderingIntegration?.config) {
     try {
       const cfg = orderingIntegration.config as Record<string, string>;
-      integrationMenuData = orderingIntegration.name === 'Square'
-        ? await posService.fetchLiveMenuFromSquare({ accessToken: cfg.accessToken, locationId: cfg.locationId })
-        : await posService.fetchLiveMenuFromClover({ accessToken: cfg.accessToken, merchantId: cfg.merchantId });
+      if (orderingIntegration.name === 'Square') {
+        integrationMenuData = await posService.fetchLiveMenuFromSquare({ accessToken: cfg.accessToken, locationId: cfg.locationId });
+      } else if (orderingIntegration.name === 'Clover') {
+        integrationMenuData = await posService.fetchLiveMenuFromClover({ accessToken: cfg.accessToken, merchantId: cfg.merchantId });
+      } else if (orderingIntegration.name === 'Zettle') {
+        integrationMenuData = await posService.fetchLiveMenuFromZettle({ accessToken: cfg.accessToken });
+      }
     } catch (err: any) {
       console.error('[AutoSync] Integration menu fetch failed (non-fatal):', err.message);
     }

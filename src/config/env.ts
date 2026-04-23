@@ -95,6 +95,10 @@ const envSchema = z.object({
   SUMUP_CLIENT_ID: z.string().default(''),
   SUMUP_CLIENT_SECRET: z.string().default(''),
 
+  // Zettle OAuth (one-tap connect)
+  ZETTLE_CLIENT_ID: z.string().default(''),
+  ZETTLE_CLIENT_SECRET: z.string().default(''),
+
   // Admin bootstrap
   ADMIN_EMAIL: z.string().default(''),
   ADMIN_PASSWORD: z.string().default(''),

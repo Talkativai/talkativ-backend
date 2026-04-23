@@ -280,6 +280,7 @@ model Reservation {
   guestEmail             String?
   externalId             String?
   talkativRef            String?           @unique
+  reminderSent           Boolean           @default(false)
   business               Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
   call                   Call?             @relation(fields: [callId], references: [id])
 

@@ -9,6 +9,7 @@ router.get('/stripe/callback', integrationsController.stripeConnectCallback);
 router.get('/square/callback', integrationsController.squareConnectCallback);
 router.get('/clover/callback', integrationsController.cloverConnectCallback);
 router.get('/sumup/callback', integrationsController.sumupConnectCallback);
+router.get('/zettle/callback', integrationsController.zettleConnectCallback);
 
 // ─── All other routes require authentication ──────────────────────────────────
 router.use(authenticate);
@@ -22,6 +23,7 @@ router.delete('/stripe/disconnect', integrationsController.stripeConnectDisconne
 router.get('/square/connect', integrationsController.squareConnectInit);
 router.get('/clover/connect', integrationsController.cloverConnectInit);
 router.get('/sumup/connect', integrationsController.sumupConnectInit);
+router.get('/zettle/connect', integrationsController.zettleConnectInit);
 
 router.delete('/:id/disconnect', integrationsController.disconnectIntegration);
 router.put('/:id/set-primary', integrationsController.setPrimaryIntegration);

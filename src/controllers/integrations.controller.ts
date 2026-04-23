@@ -504,6 +504,77 @@ export const sumupConnectCallback = asyncHandler(async (req: Request, res: Respo
   }
 });
 
+// ─── Zettle OAuth ─────────────────────────────────────────────────────────────
+
+export const zettleConnectInit = asyncHandler(async (req: Request, res: Response) => {
+  if (!env.ZETTLE_CLIENT_ID) throw ApiError.badRequest('Zettle OAuth is not configured on this platform.');
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
+
+  const state = buildOAuthState(businessId);
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: env.ZETTLE_CLIENT_ID,
+    redirect_uri: `${env.BACKEND_URL}/api/integrations/zettle/callback`,
+    scope: 'READ:USERINFO READ:PRODUCT READ:FINANCE',
+    state,
+  });
+
+  res.json({ url: `https://oauth.zettle.com/oauth/authorize?${params.toString()}` });
+});
+
+export const zettleConnectCallback = asyncHandler(async (req: Request, res: Response) => {
+  const { code, state, error } = req.query as Record<string, string>;
+  const base = env.FRONTEND_URL.replace(/\/$/, '');
+  const hashPath = '#/dashboard';
+
+  if (error || !code || !state) {
+    return res.redirect(`${base}?zettle_error=${encodeURIComponent(error || 'missing_params')}${hashPath}`);
+  }
+
+  let businessId: string;
+  try { businessId = parseOAuthState(state); }
+  catch { return res.redirect(`${base}?zettle_error=invalid_state${hashPath}`); }
+
+  try {
+    const tokenRes = await fetch('https://oauth.zettle.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        client_id: env.ZETTLE_CLIENT_ID,
+        client_secret: env.ZETTLE_CLIENT_SECRET,
+        code,
+        redirect_uri: `${env.BACKEND_URL}/api/integrations/zettle/callback`,
+      }).toString(),
+    });
+    const tokenData = await tokenRes.json() as any;
+    if (!tokenRes.ok || !tokenData.access_token) {
+      throw new Error(tokenData.error_description || tokenData.error || 'Token exchange failed');
+    }
+
+    const accessToken: string = tokenData.access_token;
+
+    // Fetch user profile to get org UUID
+    const meRes = await fetch('https://oauth.zettle.com/users/me', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const meData = await meRes.json() as any;
+    const merchantCode: string = meData.uuid || meData.organizationId || '';
+
+    await prisma.integration.upsert({
+      where: { businessId_name: { businessId, name: 'Zettle' } },
+      update: { status: 'CONNECTED', config: { accessToken, merchantCode }, lastSynced: new Date() },
+      create: { businessId, name: 'Zettle', category: 'ordering', status: 'CONNECTED', config: { accessToken, merchantCode }, lastSynced: new Date() },
+    });
+
+    return res.redirect(`${base}?zettle_connected=1${hashPath}`);
+  } catch (err: any) {
+    console.error('[Zettle OAuth] Error:', err);
+    return res.redirect(`${base}?zettle_error=${encodeURIComponent(err.message || 'connection_failed')}${hashPath}`);
+  }
+});
+
 // ─── Stripe Connect — disconnect ─────────────────────────────────────────────
 
 export const stripeConnectDisconnect = asyncHandler(async (req: Request, res: Response) => {

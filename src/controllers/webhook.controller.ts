@@ -1296,26 +1296,46 @@ export const createReservation = asyncHandler(async (req: Request, res: Response
   let paymentLink = null;
   const formattedDate = new Date(date_time).toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-  // ── Deposit payment routing: Square → SumUp → Stripe Connect → nothing ──────
+  // ── Deposit payment routing: isPrimary first, then Square → SumUp → Stripe ──
   if (depositRequired && actualDeposit > 0 && guest_phone) {
     try {
       const businessCurrency = ((business as any).currency || 'GBP').toUpperCase();
-      const squareInt = business.integrations?.find((i: any) => i.name === 'Square' && i.status === 'CONNECTED');
-      const sumupInt  = business.integrations?.find((i: any) => i.name === 'SumUp'  && i.status === 'CONNECTED');
-      const stripeInt = business.integrations?.find((i: any) => i.name === 'Stripe' && i.status === 'CONNECTED');
+      const PAYMENT_PROVIDERS_RES = ['Square', 'Clover', 'SumUp', 'Zettle', 'Stripe'];
+      const connectedPayInts = business.integrations?.filter(
+        (i: any) => PAYMENT_PROVIDERS_RES.includes(i.name) && i.status === 'CONNECTED',
+      ) || [];
+      const primaryDepositInt = connectedPayInts.find((i: any) => i.isPrimary)
+        || connectedPayInts.sort((a: any, b: any) =>
+            PAYMENT_PROVIDERS_RES.indexOf(a.name) - PAYMENT_PROVIDERS_RES.indexOf(b.name),
+          )[0]
+        || null;
 
-      if (squareInt) {
-        const cfg = squareInt.config as any;
+      const resolvedName = primaryDepositInt?.name;
+      const cfg = primaryDepositInt?.config as any;
+
+      if (resolvedName === 'Square') {
         paymentLink = await paymentProviders.createSquarePaymentLink(
           cfg, reservation.id, `Deposit for ${guests} guests at ${business.name}`, actualDeposit, businessCurrency,
         );
-      } else if (sumupInt) {
-        const cfg = sumupInt.config as any;
+      } else if (resolvedName === 'SumUp') {
         paymentLink = await paymentProviders.createSumUpCheckout(
           cfg, reservation.id, `Deposit for ${guests} guests at ${business.name}`, actualDeposit, businessCurrency,
         );
-      } else if (stripeInt) {
-        const cfg = stripeInt.config as any;
+      } else if (resolvedName === 'Clover' || resolvedName === 'Zettle') {
+        // No hosted link — fall through to Stripe if available
+        const stripeInt = connectedPayInts.find((i: any) => i.name === 'Stripe');
+        if (stripeInt) {
+          const sCfg = stripeInt.config as any;
+          const paymentIntent = await stripeService.createPaymentIntentWithConnect(
+            Math.round(actualDeposit * 100),
+            businessCurrency.toLowerCase(),
+            { type: 'reservation_deposit', reservation_id: reservation.id, business_id, guest_name },
+            sCfg.accountId,
+          );
+          await prisma.reservation.update({ where: { id: reservation.id }, data: { depositPaymentIntentId: paymentIntent.id } });
+          paymentLink = `${env.FRONTEND_URL}/#/pay?pi=${paymentIntent.client_secret}&reservation_id=${reservation.id}&type=reservation`;
+        }
+      } else if (resolvedName === 'Stripe') {
         const paymentIntent = await stripeService.createPaymentIntentWithConnect(
           Math.round(actualDeposit * 100),
           businessCurrency.toLowerCase(),
@@ -1844,4 +1864,180 @@ export const confirmPayment = asyncHandler(async (req: Request, res: Response) =
   }
 
   res.json({ confirmed: true, message: `Payment confirmed! Your order is all set. A confirmation message has been sent to your phone.` });
+});
+
+// ─── Notify Transfer (agent tool) ────────────────────────────────────────────
+// Called by the agent immediately before transferring to a human. Sends an SMS
+// alert to the business owner's phone with the caller's name/number + reason.
+export const notifyTransfer = asyncHandler(async (req: Request, res: Response) => {
+  const { business_id, conversation_id, reason } = req.body;
+
+  if (!business_id) {
+    res.json({ success: false });
+    return;
+  }
+
+  const business = await prisma.business.findUnique({
+    where: { id: business_id },
+    select: { name: true, phone: true },
+  });
+
+  if (!business?.phone || !twilioService.isValidPhoneNumber(business.phone)) {
+    res.json({ success: false, message: 'No owner phone configured.' });
+    return;
+  }
+
+  const callerPhone = await resolveCallerPhone(conversation_id, business_id, undefined);
+
+  const callerInfo = callerPhone ? `Caller: ${callerPhone}` : 'Caller number unknown';
+  const reasonText = reason || 'customer requested to speak to a human';
+
+  twilioService.sendSms(
+    business.phone,
+    `[Talkativ] 📞 Call being transferred — ${callerInfo}. Reason: ${reasonText}. Check your Talkativ dashboard for full context.`,
+  ).catch(err => console.error('[NotifyTransfer] SMS failed:', err));
+
+  res.json({ success: true });
+});
+
+// ─── Upsell Suggestions (agent tool) ──────────────────────────────────────────
+// Returns contextual add-on suggestions based on items already ordered.
+// Category-based: mains → suggest drinks/sides; drinks only → suggest dessert etc.
+export const getUpsellSuggestions = asyncHandler(async (req: Request, res: Response) => {
+  const { business_id, ordered_items, party_size } = req.body;
+
+  if (!business_id || !ordered_items) {
+    res.json({ suggestions: [], message: '' });
+    return;
+  }
+
+  // Load all active menu items with their categories
+  const categories = await prisma.menuCategory.findMany({
+    where: { businessId: business_id },
+    include: { items: { where: { status: 'ACTIVE' }, orderBy: { name: 'asc' } } },
+    orderBy: { sortOrder: 'asc' },
+  });
+
+  if (categories.length === 0) {
+    res.json({ suggestions: [], message: '' });
+    return;
+  }
+
+  // Parse what's already ordered
+  const orderedNames = ordered_items.toLowerCase().split(',').map((s: string) => s.replace(/^\d+\s*[xX]\s*/, '').trim());
+
+  // Figure out which categories the ordered items belong to
+  const orderedCategories = new Set<string>();
+  for (const cat of categories) {
+    for (const item of cat.items) {
+      if (orderedNames.some((n: string) => item.name.toLowerCase().includes(n) || n.includes(item.name.toLowerCase()))) {
+        orderedCategories.add(cat.name.toLowerCase());
+      }
+    }
+  }
+
+  // Category suggestion rules
+  const isMainOrder = [...orderedCategories].some(c =>
+    c.includes('main') || c.includes('starter') || c.includes('meal') || c.includes('food') || c.includes('pizza') ||
+    c.includes('burger') || c.includes('chicken') || c.includes('rice') || c.includes('pasta'),
+  );
+  const hasDrink = [...orderedCategories].some(c => c.includes('drink') || c.includes('beverage'));
+  const hasDessert = [...orderedCategories].some(c => c.includes('dessert') || c.includes('sweet'));
+
+  // Collect candidate items that aren't already ordered
+  const suggestions: { name: string; price: number; category: string }[] = [];
+  for (const cat of categories) {
+    const catLower = cat.name.toLowerCase();
+    const shouldSuggestFrom =
+      (isMainOrder && !hasDrink && (catLower.includes('drink') || catLower.includes('beverage'))) ||
+      (isMainOrder && !hasDessert && (catLower.includes('dessert') || catLower.includes('sweet'))) ||
+      (isMainOrder && (catLower.includes('side') || catLower.includes('extra') || catLower.includes('add')));
+
+    if (shouldSuggestFrom) {
+      for (const item of cat.items.slice(0, 3)) {
+        if (!orderedNames.some((n: string) => item.name.toLowerCase().includes(n))) {
+          suggestions.push({ name: item.name, price: Number(item.price), category: cat.name });
+        }
+      }
+    }
+  }
+
+  if (suggestions.length === 0) {
+    res.json({ suggestions: [], message: '' });
+    return;
+  }
+
+  // Return up to 2 suggestions
+  const top = suggestions.slice(0, 2);
+  const currency = (await prisma.business.findUnique({ where: { id: business_id }, select: { currency: true } }))?.currency || 'GBP';
+  const symbol = currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : '$';
+  const suggestionText = top.map(s => `${s.name} (${symbol}${s.price.toFixed(2)})`).join(' or ');
+
+  res.json({
+    suggestions: top,
+    message: `Would you also like to add ${suggestionText}?`,
+  });
+});
+
+// ─── Caller History (agent tool) ─────────────────────────────────────────────
+// Returns past order/reservation history for the caller's phone number.
+export const getCallerHistory = asyncHandler(async (req: Request, res: Response) => {
+  const { business_id, conversation_id } = req.body;
+
+  if (!business_id) {
+    res.json({ returning_customer: false });
+    return;
+  }
+
+  const callerPhone = await resolveCallerPhone(conversation_id, business_id, req.body.caller_phone);
+
+  if (!callerPhone) {
+    res.json({ returning_customer: false });
+    return;
+  }
+
+  // Look up past orders
+  const pastOrders = await prisma.order.findMany({
+    where: { businessId: business_id, customerPhone: callerPhone, status: { not: 'CANCELLED' } },
+    orderBy: { createdAt: 'desc' },
+    take: 5,
+    select: { customerName: true, items: true, createdAt: true, amount: true },
+  });
+
+  // Look up past reservations
+  const pastReservations = await prisma.reservation.findMany({
+    where: { businessId: business_id, guestPhone: callerPhone, status: { not: 'CANCELLED' } },
+    orderBy: { createdAt: 'desc' },
+    take: 3,
+    select: { guestName: true, guests: true, dateTime: true },
+  });
+
+  if (pastOrders.length === 0 && pastReservations.length === 0) {
+    res.json({ returning_customer: false });
+    return;
+  }
+
+  const name = pastOrders[0]?.customerName || pastReservations[0]?.guestName || null;
+  const lastOrder = pastOrders[0];
+  const totalOrders = pastOrders.length;
+  const totalReservations = pastReservations.length;
+
+  res.json({
+    returning_customer: true,
+    customer_name: name,
+    total_orders: totalOrders,
+    total_reservations: totalReservations,
+    last_order: lastOrder ? {
+      items: lastOrder.items,
+      date: lastOrder.createdAt.toLocaleDateString('en-GB'),
+      amount: Number(lastOrder.amount),
+    } : null,
+    last_reservation: pastReservations[0] ? {
+      guests: pastReservations[0].guests,
+      date: pastReservations[0].dateTime.toLocaleDateString('en-GB'),
+    } : null,
+    message: totalOrders > 0
+      ? `Welcome back, ${name}! Last time you ordered ${lastOrder?.items?.split(',')[0]?.trim()} on ${lastOrder?.createdAt.toLocaleDateString('en-GB')}.`
+      : `Welcome back, ${name}! Great to hear from you again.`,
+  });
 });

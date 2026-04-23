@@ -297,6 +297,33 @@ export const fetchLiveMenuFromClover = async (
   return { source: 'Clover', categories };
 };
 
+export const fetchLiveMenuFromZettle = async (
+  credentials: { accessToken: string },
+): Promise<IntegrationMenuResult> => {
+  const resp = await fetch(
+    'https://products.izettle.com/organizations/self/products/v2',
+    { headers: { Authorization: `Bearer ${credentials.accessToken}` } },
+  );
+  if (!resp.ok) throw new Error(`Zettle API error: ${resp.status}`);
+  const data = await resp.json() as { data?: any[] };
+  const products = data.data || (Array.isArray(data) ? (data as any[]) : []);
+
+  const catItems = new Map<string, IntegrationMenuItem[]>();
+  for (const product of products) {
+    const name: string = product.name;
+    if (!name) continue;
+    const catName = product.category?.name || 'Menu Items';
+    const variant = (product.variants || [])[0];
+    const price = variant?.price?.amount != null ? variant.price.amount / 100 : 0;
+    if (!catItems.has(catName)) catItems.set(catName, []);
+    catItems.get(catName)!.push({ name, description: product.description || undefined, price });
+  }
+
+  const categories: IntegrationMenuCategory[] = [];
+  for (const [name, items] of catItems) categories.push({ name, items });
+  return { source: 'Zettle', categories };
+};
+
 // ─── Unified push ─────────────────────────────────────────────────────────────
 
 export const pushOrderToPOS = async (
