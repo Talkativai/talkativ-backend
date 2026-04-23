@@ -328,64 +328,63 @@ export const getIntegrationStats = asyncHandler(async (_req: Request, res: Respo
       return;
     }
     try {
-      // Pricing per 1M tokens (USD) — claude.ai/pricing
-      const MODEL_PRICING: Record<string, { input: number; output: number; cacheWrite: number }> = {
-        'claude-haiku-4-5':            { input: 0.80,  output: 4.00,  cacheWrite: 1.00  },
-        'claude-haiku-4-5-20251001':   { input: 0.80,  output: 4.00,  cacheWrite: 1.00  },
-        'claude-3-5-haiku-20241022':   { input: 0.80,  output: 4.00,  cacheWrite: 1.00  },
-        'claude-sonnet-4-6':           { input: 3.00,  output: 15.00, cacheWrite: 3.75  },
-        'claude-sonnet-4-6-20250514':  { input: 3.00,  output: 15.00, cacheWrite: 3.75  },
-        'claude-opus-4-7':             { input: 15.00, output: 75.00, cacheWrite: 18.75 },
-        'claude-opus-4-7-20250514':    { input: 15.00, output: 75.00, cacheWrite: 18.75 },
-      };
-      const DEFAULT_PRICING = { input: 0.80, output: 4.00, cacheWrite: 1.00 };
-
       const startingAt = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
       const endingAt   = new Date().toISOString();
-      const params = new URLSearchParams({
-        starting_at: startingAt,
-        ending_at:   endingAt,
-        bucket_width: '1d',
-      });
-      params.append('group_by[]', 'model');
+      const headers    = { 'x-api-key': env.ANTHROPIC_ADMIN_KEY, 'anthropic-version': '2023-06-01' };
 
-      const usageRes = await fetch(
-        `https://api.anthropic.com/v1/organizations/usage_report/messages?${params.toString()}`,
-        { headers: { 'x-api-key': env.ANTHROPIC_ADMIN_KEY, 'anthropic-version': '2023-06-01' } }
-      );
+      // Fetch usage + cost reports in parallel
+      const usageParams = new URLSearchParams({ starting_at: startingAt, ending_at: endingAt, bucket_width: '1d' });
+      usageParams.append('group_by[]', 'model');
+
+      const costParams = new URLSearchParams({ starting_at: startingAt, ending_at: endingAt, bucket_width: '1d' });
+
+      const [usageRes, costRes] = await Promise.all([
+        fetch(`https://api.anthropic.com/v1/organizations/usage_report/messages?${usageParams}`, { headers }),
+        fetch(`https://api.anthropic.com/v1/organizations/cost_report?${costParams}`, { headers }),
+      ]);
 
       if (!usageRes.ok) {
         results.anthropic = { status: 'error', message: `Admin API returned ${usageRes.status}`, totalExtractions };
         return;
       }
 
+      // ── Usage (tokens by model) ──
       const usageData = await usageRes.json() as any;
-      const buckets: any[] = usageData.data ?? usageData.usage_data ?? [];
+      const usageBuckets: any[] = usageData.data ?? [];
 
-      // Aggregate totals + cost per model
-      const modelMap: Record<string, { inputTokens: number; outputTokens: number; cacheTokens: number; costUsd: number }> = {};
-      let totalInputTokens = 0, totalOutputTokens = 0, totalCacheTokens = 0, totalCostUsd = 0;
+      const modelMap: Record<string, { inputTokens: number; outputTokens: number; cacheTokens: number }> = {};
+      let totalInputTokens = 0, totalOutputTokens = 0, totalCacheTokens = 0;
 
-      for (const b of buckets) {
+      for (const b of usageBuckets) {
         const model: string = b.model ?? 'unknown';
         const input  = b.input_tokens ?? b.uncached_input_tokens ?? 0;
         const output = b.output_tokens ?? 0;
         const cache  = b.cache_creation_input_tokens ?? 0;
-        const pricing = MODEL_PRICING[model] ?? DEFAULT_PRICING;
-        const costUsd = (input / 1_000_000) * pricing.input
-                      + (output / 1_000_000) * pricing.output
-                      + (cache  / 1_000_000) * pricing.cacheWrite;
-
-        if (!modelMap[model]) modelMap[model] = { inputTokens: 0, outputTokens: 0, cacheTokens: 0, costUsd: 0 };
+        if (!modelMap[model]) modelMap[model] = { inputTokens: 0, outputTokens: 0, cacheTokens: 0 };
         modelMap[model].inputTokens  += input;
         modelMap[model].outputTokens += output;
         modelMap[model].cacheTokens  += cache;
-        modelMap[model].costUsd      += costUsd;
-
         totalInputTokens  += input;
         totalOutputTokens += output;
         totalCacheTokens  += cache;
-        totalCostUsd      += costUsd;
+      }
+
+      // ── Cost report (actual USD from Anthropic) ──
+      let totalCostUsd = 0;
+      let costByType: Record<string, number> = {};
+      if (costRes.ok) {
+        const costData = await costRes.json() as any;
+        const costBuckets: any[] = costData.data ?? [];
+        for (const b of costBuckets) {
+          // costs are decimal strings in USD cents — sum all cost fields
+          for (const [k, v] of Object.entries(b)) {
+            if (k.endsWith('_cost') && typeof v === 'string') {
+              const usd = parseFloat(v) / 100;
+              totalCostUsd += usd;
+              costByType[k] = (costByType[k] ?? 0) + usd;
+            }
+          }
+        }
       }
 
       results.anthropic = {
@@ -393,14 +392,16 @@ export const getIntegrationStats = asyncHandler(async (_req: Request, res: Respo
         last30DaysInputTokens:  totalInputTokens,
         last30DaysOutputTokens: totalOutputTokens,
         last30DaysCacheTokens:  totalCacheTokens,
-        estimatedCostUsd:       parseFloat(totalCostUsd.toFixed(4)),
+        actualCostUsd:          parseFloat(totalCostUsd.toFixed(6)),
+        costByType:             Object.fromEntries(Object.entries(costByType).map(([k, v]) => [k, parseFloat(v.toFixed(6))])),
         byModel: Object.entries(modelMap).map(([model, d]) => ({
           model,
           inputTokens:  d.inputTokens,
           outputTokens: d.outputTokens,
-          estimatedCostUsd: parseFloat(d.costUsd.toFixed(4)),
+          totalTokens:  d.inputTokens + d.outputTokens + d.cacheTokens,
         })),
         totalExtractions,
+        note: 'Credit balance and deposit history are not available via API — check console.anthropic.com',
       };
     } catch (e: any) {
       results.anthropic = { status: 'error', message: e.message, totalExtractions };
