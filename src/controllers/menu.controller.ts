@@ -279,11 +279,25 @@ export const getLiveIntegrationMenu = asyncHandler(async (req: Request, res: Res
   const businessId = req.user!.businessId;
   if (!businessId) throw ApiError.notFound('Business not found');
 
+  // Enforce plan: Pro-only POS integrations are blocked on Growth
+  const business = await prisma.business.findUnique({
+    where: { id: businessId },
+    select: { subscription: { select: { plan: true } } },
+  });
+  const plan = business?.subscription?.plan ?? 'GROWTH';
+  const isPro = plan === 'PRO' || plan === 'ENTERPRISE';
+  const PRO_ONLY_POS = ['Square', 'Clover', 'Zettle', 'SpotOn'];
+
   const integration = await prisma.integration.findFirst({
     where: { businessId, name: { in: ['Square', 'Clover', 'Zettle'] }, status: 'CONNECTED' },
   });
 
   if (!integration?.config) {
+    res.json({ source: null, categories: [] });
+    return;
+  }
+
+  if (!isPro && PRO_ONLY_POS.includes(integration.name)) {
     res.json({ source: null, categories: [] });
     return;
   }
