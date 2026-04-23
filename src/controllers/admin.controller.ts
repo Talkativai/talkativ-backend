@@ -329,9 +329,10 @@ export const getIntegrationStats = asyncHandler(async (_req: Request, res: Respo
     }
     try {
       // Last 30 days usage report
-      const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const startingAt = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const endingAt   = new Date().toISOString();
       const usageRes = await fetch(
-        `https://api.anthropic.com/v1/organizations/usage?start_date=${startDate}&bucket_width=1d`,
+        `https://api.anthropic.com/v1/organizations/usage_report/messages?starting_at=${encodeURIComponent(startingAt)}&ending_at=${encodeURIComponent(endingAt)}&bucket_width=1d`,
         {
           headers: {
             'x-api-key': env.ANTHROPIC_ADMIN_KEY,
