@@ -188,6 +188,7 @@ model ReservationPolicy {
   depositAmount         Float       @default(0)
   depositType           DepositType @default(PER_GUEST)
   maxPartySize          Int         @default(20)
+  seatingCapacity       Int         @default(50)
   bookingLeadTime       Int         @default(24)
   cancellationHours     Int         @default(24)
   createdAt             DateTime    @default(now())

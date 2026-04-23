@@ -158,7 +158,7 @@ export const getReservationPolicy = asyncHandler(async (req: Request, res: Respo
   const businessId = req.user!.businessId;
   if (!businessId) throw ApiError.notFound('Business not found');
   const policy = await prisma.reservationPolicy.findUnique({ where: { businessId } });
-  res.json(policy || { reservationsEnabled: false, depositRequired: false, depositAmount: 0, depositType: 'PER_GUEST', maxPartySize: 20, bookingLeadTime: 24, cancellationHours: 24 });
+  res.json(policy || { reservationsEnabled: false, depositRequired: false, depositAmount: 0, depositType: 'PER_GUEST', maxPartySize: 20, seatingCapacity: 50, bookingLeadTime: 24, cancellationHours: 24 });
 });
 
 export const updateReservationPolicy = asyncHandler(async (req: Request, res: Response) => {

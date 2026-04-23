@@ -1179,7 +1179,31 @@ export const checkAvailability = asyncHandler(async (req: Request, res: Response
   );
 
   if (!reservationIntegration?.config) {
-    // No integration — check basic opening hours only
+    // No external integration — check Talkativ DB for conflicting bookings
+    const requestedDT = new Date(`${date}T${time}`);
+    const windowStart = new Date(requestedDT.getTime() - 30 * 60 * 1000);
+    const windowEnd   = new Date(requestedDT.getTime() + 30 * 60 * 1000);
+    const seatingCapacity = business.reservationPolicy?.seatingCapacity ?? 50;
+
+    const existingBookings = await prisma.reservation.findMany({
+      where: {
+        businessId: business.id,
+        status: { in: ['PENDING', 'CONFIRMED'] },
+        dateTime: { gte: windowStart, lte: windowEnd },
+      },
+      select: { guests: true },
+    });
+
+    const guestsAlreadyBooked = existingBookings.reduce((sum, r) => sum + r.guests, 0);
+    if (guestsAlreadyBooked + partySize > seatingCapacity) {
+      res.json({
+        available: false,
+        slots: [],
+        message: `Unfortunately ${time} on ${date} is fully booked for ${partySize} guests. Please suggest a different time to the customer.`,
+      });
+      return;
+    }
+
     res.json({ available: true, slots: [{ time, available: true }], message: `${date} at ${time} for ${partySize} guests is available.` });
     return;
   }
