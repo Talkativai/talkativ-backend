@@ -328,44 +328,78 @@ export const getIntegrationStats = asyncHandler(async (_req: Request, res: Respo
       return;
     }
     try {
-      // Last 30 days usage report
+      // Pricing per 1M tokens (USD) — claude.ai/pricing
+      const MODEL_PRICING: Record<string, { input: number; output: number; cacheWrite: number }> = {
+        'claude-haiku-4-5':            { input: 0.80,  output: 4.00,  cacheWrite: 1.00  },
+        'claude-haiku-4-5-20251001':   { input: 0.80,  output: 4.00,  cacheWrite: 1.00  },
+        'claude-3-5-haiku-20241022':   { input: 0.80,  output: 4.00,  cacheWrite: 1.00  },
+        'claude-sonnet-4-6':           { input: 3.00,  output: 15.00, cacheWrite: 3.75  },
+        'claude-sonnet-4-6-20250514':  { input: 3.00,  output: 15.00, cacheWrite: 3.75  },
+        'claude-opus-4-7':             { input: 15.00, output: 75.00, cacheWrite: 18.75 },
+        'claude-opus-4-7-20250514':    { input: 15.00, output: 75.00, cacheWrite: 18.75 },
+      };
+      const DEFAULT_PRICING = { input: 0.80, output: 4.00, cacheWrite: 1.00 };
+
       const startingAt = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
       const endingAt   = new Date().toISOString();
+      const params = new URLSearchParams({
+        starting_at: startingAt,
+        ending_at:   endingAt,
+        bucket_width: '1d',
+      });
+      params.append('group_by[]', 'model');
+
       const usageRes = await fetch(
-        `https://api.anthropic.com/v1/organizations/usage_report/messages?starting_at=${encodeURIComponent(startingAt)}&ending_at=${encodeURIComponent(endingAt)}&bucket_width=1d`,
-        {
-          headers: {
-            'x-api-key': env.ANTHROPIC_ADMIN_KEY,
-            'anthropic-version': '2023-06-01',
-          },
-        }
+        `https://api.anthropic.com/v1/organizations/usage_report/messages?${params.toString()}`,
+        { headers: { 'x-api-key': env.ANTHROPIC_ADMIN_KEY, 'anthropic-version': '2023-06-01' } }
       );
 
       if (!usageRes.ok) {
-        results.anthropic = {
-          status: 'error',
-          message: `Admin API returned ${usageRes.status}`,
-          totalExtractions,
-        };
+        results.anthropic = { status: 'error', message: `Admin API returned ${usageRes.status}`, totalExtractions };
         return;
       }
 
       const usageData = await usageRes.json() as any;
       const buckets: any[] = usageData.data ?? usageData.usage_data ?? [];
-      const totals = buckets.reduce(
-        (acc, b) => ({
-          inputTokens: acc.inputTokens + (b.input_tokens ?? b.uncached_input_tokens ?? 0),
-          outputTokens: acc.outputTokens + (b.output_tokens ?? 0),
-          cacheTokens: acc.cacheTokens + (b.cache_creation_input_tokens ?? 0),
-        }),
-        { inputTokens: 0, outputTokens: 0, cacheTokens: 0 }
-      );
+
+      // Aggregate totals + cost per model
+      const modelMap: Record<string, { inputTokens: number; outputTokens: number; cacheTokens: number; costUsd: number }> = {};
+      let totalInputTokens = 0, totalOutputTokens = 0, totalCacheTokens = 0, totalCostUsd = 0;
+
+      for (const b of buckets) {
+        const model: string = b.model ?? 'unknown';
+        const input  = b.input_tokens ?? b.uncached_input_tokens ?? 0;
+        const output = b.output_tokens ?? 0;
+        const cache  = b.cache_creation_input_tokens ?? 0;
+        const pricing = MODEL_PRICING[model] ?? DEFAULT_PRICING;
+        const costUsd = (input / 1_000_000) * pricing.input
+                      + (output / 1_000_000) * pricing.output
+                      + (cache  / 1_000_000) * pricing.cacheWrite;
+
+        if (!modelMap[model]) modelMap[model] = { inputTokens: 0, outputTokens: 0, cacheTokens: 0, costUsd: 0 };
+        modelMap[model].inputTokens  += input;
+        modelMap[model].outputTokens += output;
+        modelMap[model].cacheTokens  += cache;
+        modelMap[model].costUsd      += costUsd;
+
+        totalInputTokens  += input;
+        totalOutputTokens += output;
+        totalCacheTokens  += cache;
+        totalCostUsd      += costUsd;
+      }
 
       results.anthropic = {
         status: 'connected',
-        last30DaysInputTokens: totals.inputTokens,
-        last30DaysOutputTokens: totals.outputTokens,
-        last30DaysCacheTokens: totals.cacheTokens,
+        last30DaysInputTokens:  totalInputTokens,
+        last30DaysOutputTokens: totalOutputTokens,
+        last30DaysCacheTokens:  totalCacheTokens,
+        estimatedCostUsd:       parseFloat(totalCostUsd.toFixed(4)),
+        byModel: Object.entries(modelMap).map(([model, d]) => ({
+          model,
+          inputTokens:  d.inputTokens,
+          outputTokens: d.outputTokens,
+          estimatedCostUsd: parseFloat(d.costUsd.toFixed(4)),
+        })),
         totalExtractions,
       };
     } catch (e: any) {
