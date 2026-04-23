@@ -280,7 +280,7 @@ export const getLiveIntegrationMenu = asyncHandler(async (req: Request, res: Res
   if (!businessId) throw ApiError.notFound('Business not found');
 
   const integration = await prisma.integration.findFirst({
-    where: { businessId, name: { in: ['Square', 'Clover'] }, status: 'CONNECTED' },
+    where: { businessId, name: { in: ['Square', 'Clover', 'Zettle'] }, status: 'CONNECTED' },
   });
 
   if (!integration?.config) {
@@ -293,8 +293,10 @@ export const getLiveIntegrationMenu = asyncHandler(async (req: Request, res: Res
     let result: posService.IntegrationMenuResult;
     if (integration.name === 'Square') {
       result = await posService.fetchLiveMenuFromSquare({ accessToken: config.accessToken, locationId: config.locationId });
-    } else {
+    } else if (integration.name === 'Clover') {
       result = await posService.fetchLiveMenuFromClover({ accessToken: config.accessToken, merchantId: config.merchantId });
+    } else {
+      result = await posService.fetchLiveMenuFromZettle({ accessToken: config.accessToken });
     }
     res.json(result);
   } catch (err: any) {
