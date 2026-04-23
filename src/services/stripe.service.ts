@@ -53,12 +53,8 @@ export const cancelSubscription = async (subscriptionId: string) => {
 export const changePlan = async (subscriptionId: string, newPriceId: string) => {
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
   return stripe.subscriptions.update(subscriptionId, {
-    items: [
-      {
-        id: subscription.items.data[0].id,
-        price: newPriceId,
-      },
-    ],
+    items: [{ id: subscription.items.data[0].id, price: newPriceId }],
+    proration_behavior: 'none',
   });
 };
 
