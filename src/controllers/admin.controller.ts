@@ -316,97 +316,12 @@ export const getIntegrationStats = asyncHandler(async (_req: Request, res: Respo
     }
   })();
 
-  // ── Anthropic — usage report (requires Admin API key) ──
-  await (async () => {
-    const totalExtractions = await prisma.businessExtraction.count();
-    if (!env.ANTHROPIC_ADMIN_KEY) {
-      results.anthropic = {
-        status: env.ANTHROPIC_API_KEY ? 'connected' : 'not_configured',
-        note: 'Add ANTHROPIC_ADMIN_KEY to .env for live token usage and cost data.',
-        totalExtractions,
-      };
-      return;
-    }
-    try {
-      const startingAt = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      const endingAt   = new Date().toISOString();
-      const headers    = { 'x-api-key': env.ANTHROPIC_ADMIN_KEY, 'anthropic-version': '2023-06-01' };
-
-      // Fetch usage + cost reports in parallel
-      const usageParams = new URLSearchParams({ starting_at: startingAt, ending_at: endingAt, bucket_width: '1d' });
-      usageParams.append('group_by[]', 'model');
-
-      const costParams = new URLSearchParams({ starting_at: startingAt, ending_at: endingAt, bucket_width: '1d' });
-
-      const [usageRes, costRes] = await Promise.all([
-        fetch(`https://api.anthropic.com/v1/organizations/usage_report/messages?${usageParams}`, { headers }),
-        fetch(`https://api.anthropic.com/v1/organizations/cost_report?${costParams}`, { headers }),
-      ]);
-
-      if (!usageRes.ok) {
-        results.anthropic = { status: 'error', message: `Admin API returned ${usageRes.status}`, totalExtractions };
-        return;
-      }
-
-      // ── Usage (tokens by model) ──
-      const usageData = await usageRes.json() as any;
-      const usageBuckets: any[] = usageData.data ?? [];
-
-      const modelMap: Record<string, { inputTokens: number; outputTokens: number; cacheTokens: number }> = {};
-      let totalInputTokens = 0, totalOutputTokens = 0, totalCacheTokens = 0;
-
-      for (const b of usageBuckets) {
-        const model: string = b.model ?? 'unknown';
-        const input  = b.input_tokens ?? b.uncached_input_tokens ?? 0;
-        const output = b.output_tokens ?? 0;
-        const cache  = b.cache_creation_input_tokens ?? 0;
-        if (!modelMap[model]) modelMap[model] = { inputTokens: 0, outputTokens: 0, cacheTokens: 0 };
-        modelMap[model].inputTokens  += input;
-        modelMap[model].outputTokens += output;
-        modelMap[model].cacheTokens  += cache;
-        totalInputTokens  += input;
-        totalOutputTokens += output;
-        totalCacheTokens  += cache;
-      }
-
-      // ── Cost report (actual USD from Anthropic) ──
-      let totalCostUsd = 0;
-      let costByType: Record<string, number> = {};
-      if (costRes.ok) {
-        const costData = await costRes.json() as any;
-        const costBuckets: any[] = costData.data ?? [];
-        for (const b of costBuckets) {
-          // costs are decimal strings in USD cents — sum all cost fields
-          for (const [k, v] of Object.entries(b)) {
-            if (k.endsWith('_cost') && typeof v === 'string') {
-              const usd = parseFloat(v) / 100;
-              totalCostUsd += usd;
-              costByType[k] = (costByType[k] ?? 0) + usd;
-            }
-          }
-        }
-      }
-
-      results.anthropic = {
-        status: 'connected',
-        last30DaysInputTokens:  totalInputTokens,
-        last30DaysOutputTokens: totalOutputTokens,
-        last30DaysCacheTokens:  totalCacheTokens,
-        actualCostUsd:          parseFloat(totalCostUsd.toFixed(6)),
-        costByType:             Object.fromEntries(Object.entries(costByType).map(([k, v]) => [k, parseFloat(v.toFixed(6))])),
-        byModel: Object.entries(modelMap).map(([model, d]) => ({
-          model,
-          inputTokens:  d.inputTokens,
-          outputTokens: d.outputTokens,
-          totalTokens:  d.inputTokens + d.outputTokens + d.cacheTokens,
-        })),
-        totalExtractions,
-        note: 'Credit balance and deposit history are not available via API — check console.anthropic.com',
-      };
-    } catch (e: any) {
-      results.anthropic = { status: 'error', message: e.message, totalExtractions };
-    }
-  })();
+  // ── Anthropic ──
+  const totalExtractions = await prisma.businessExtraction.count();
+  results.anthropic = {
+    status: env.ANTHROPIC_API_KEY ? 'connected' : 'not_configured',
+    totalExtractions,
+  };
 
   // ── Google Places — no usage API with API key ──
   results.googlePlaces = {
