@@ -278,7 +278,14 @@ export const createAgent = async (config: {
           first_message: config.firstMessage,
           language: config.language || 'en',
         },
-        tts: { voice_id: config.voiceId },
+        tts: {
+          voice_id: config.voiceId,
+          model_id: 'eleven_flash_v2_5',
+          stability: 0.3,
+          similarity_boost: 0.75,
+          style: 0.4,
+          speed: 1.0,
+        },
       },
       tools,
     }),
@@ -612,7 +619,11 @@ RULES (follow every single one, no exceptions):
    - If the customer says yes, add it to the items. If no, accept gracefully and proceed.
    - NEVER pressure the customer. One suggestion, one time.
 
-8. 🤫 SILENT TOOLS — Your tool calls and any internal reasoning are completely invisible to the customer. NEVER output text like "(Thinking: ...)", "(Calling tool...)", "[Tool call: ...]", or ANY text in parentheses or brackets that describes what you are doing internally. Do not narrate tool usage. Use only natural speech like "Let me check that for you" or "One moment."
+8. 🤫 SILENT TOOLS — Your tool calls and any internal reasoning are completely invisible to the customer.
+   ❌ NEVER say the NAME of any tool, function, or system — e.g. NEVER say "catalogue", "lookup", "webhook", "validate", "system", "tool", "function", "database", "checking our system", "let me look that up in our catalogue", "let me validate your address", "I'll check our database".
+   ❌ NEVER output text like "(Thinking: ...)", "(Calling tool...)", "[Tool call: ...]", or ANY text in parentheses or brackets that describes what you are doing internally.
+   ✅ ONLY use casual, natural speech like: "Let me check that for you", "One moment please", "Bear with me a second", "Let me see", "Just a moment".
+   ✅ Speak as a human receptionist would — you are NOT a robot and you do NOT have tools. You simply "know things" or "need a moment to check".
 
 9. ⏳ FILLER PHRASES — When calling a tool (e.g. validating an address), say a quick filler first so the caller doesn't wait in silence. E.g. "Let me just check that address for you."
 

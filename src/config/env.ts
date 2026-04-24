@@ -76,6 +76,7 @@ const envSchema = z.object({
   TWILIO_PHONE_NUMBER: z.string().default(''),
   TWILIO_BUNDLE_SID: z.string().default(''),
   TWILIO_ADDRESS_SID: z.string().default(''),
+  TWILIO_MESSAGING_SERVICE_SID: z.string().default(''), // MG... SID — sends SMS via Messaging Service (alphanumeric sender)
 
   // ElevenLabs demo agent
   ELEVENLABS_DEMO_AGENT_ID: z.string().default(''),

@@ -702,7 +702,8 @@ export const catalogueLookup = asyncHandler(async (req: Request, res: Response) 
     return;
   }
 
-  const items = await prisma.menuItem.findMany({
+  // Tier 1: Search by item name (exact substring match)
+  const byName = await prisma.menuItem.findMany({
     where: {
       category: { businessId: business_id },
       name: { contains: query, mode: 'insensitive' },
@@ -711,22 +712,48 @@ export const catalogueLookup = asyncHandler(async (req: Request, res: Response) 
     select: { name: true, description: true, price: true },
     take: 10,
   });
+  if (byName.length > 0) { res.json({ items: byName }); return; }
 
-  if (items.length === 0) {
-    // Also try searching by category name
-    const byCategory = await prisma.menuItem.findMany({
+  // Tier 2: Search by item description (catches ingredients/components e.g. "gbegiri" in "Amala + Gbegiri + Ewedu")
+  const byDesc = await prisma.menuItem.findMany({
+    where: {
+      category: { businessId: business_id },
+      description: { contains: query, mode: 'insensitive' },
+      status: 'ACTIVE',
+    },
+    select: { name: true, description: true, price: true },
+    take: 10,
+  });
+  if (byDesc.length > 0) { res.json({ items: byDesc }); return; }
+
+  // Tier 3: Split multi-word queries and search each keyword in both name AND description
+  const keywords = query.split(/[\s,+&]+/).map((w: string) => w.trim()).filter((w: string) => w.length >= 2);
+  if (keywords.length > 1) {
+    const byKeywords = await prisma.menuItem.findMany({
       where: {
-        category: { businessId: business_id, name: { contains: query, mode: 'insensitive' } },
+        category: { businessId: business_id },
         status: 'ACTIVE',
+        OR: keywords.flatMap((kw: string) => [
+          { name: { contains: kw, mode: 'insensitive' as const } },
+          { description: { contains: kw, mode: 'insensitive' as const } },
+        ]),
       },
       select: { name: true, description: true, price: true },
       take: 10,
     });
-    res.json({ items: byCategory });
-    return;
+    if (byKeywords.length > 0) { res.json({ items: byKeywords }); return; }
   }
 
-  res.json({ items });
+  // Tier 4: Fallback — search by category name
+  const byCategory = await prisma.menuItem.findMany({
+    where: {
+      category: { businessId: business_id, name: { contains: query, mode: 'insensitive' } },
+      status: 'ACTIVE',
+    },
+    select: { name: true, description: true, price: true },
+    take: 10,
+  });
+  res.json({ items: byCategory });
 });
 
 // Haversine formula

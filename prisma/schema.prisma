@@ -310,6 +310,7 @@ model MenuItem {
   description String?
   price       Decimal
   status      MenuItemStatus @default(ACTIVE)
+  source      String?        // null = manual/DB, "Square"/"Clover"/"Zettle" = cached from POS
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
   category    MenuCategory   @relation(fields: [categoryId], references: [id], onDelete: Cascade)

@@ -85,7 +85,16 @@ export const updateVoice = asyncHandler(async (req: Request, res: Response) => {
   // Push new voice to ElevenLabs immediately
   if (agent.elevenlabsAgentId && req.body.voiceId) {
     elevenlabs.updateAgent(agent.elevenlabsAgentId, {
-      conversation_config: { tts: { voice_id: req.body.voiceId } },
+      conversation_config: {
+        tts: {
+          voice_id: req.body.voiceId,
+          model_id: 'eleven_flash_v2_5',
+          stability: 0.3,
+          similarity_boost: 0.75,
+          style: 0.4,
+          speed: 1.0,
+        },
+      },
     }).catch(e => console.error('[AutoSync] voice update failed:', e.message));
   }
   // Rebuild system prompt (greeting etc. may reference agent settings)
@@ -249,6 +258,58 @@ export const autoSyncAgent = async (businessId: string): Promise<number> => {
     }
   }
 
+  // ── Cache POS items into DB so catalogue lookup (smart search) finds them ───
+  if (integrationMenuData?.categories?.length) {
+    const posSource = integrationMenuData.source; // "Square" | "Clover" | "Zettle"
+    try {
+      // Collect existing DB item names (source=null) to avoid duplicates
+      const dbItemNames = new Set(
+        dbMenuCategories.flatMap(c => (c.items || []).map((i: any) => i.name.toLowerCase()))
+      );
+
+      // Delete old POS-cached items for this business before inserting fresh ones
+      const oldPosCategoryIds = (await prisma.menuCategory.findMany({
+        where: { businessId },
+        select: { id: true },
+      })).map(c => c.id);
+      if (oldPosCategoryIds.length > 0) {
+        await prisma.menuItem.deleteMany({
+          where: { categoryId: { in: oldPosCategoryIds }, source: posSource },
+        });
+      }
+
+      // Insert fresh POS items (skip any that already exist in DB)
+      for (const intCat of integrationMenuData.categories) {
+        // Find or create the category
+        let category = await prisma.menuCategory.findFirst({
+          where: { businessId, name: { equals: intCat.name, mode: 'insensitive' } },
+        });
+        if (!category) {
+          category = await prisma.menuCategory.create({
+            data: { businessId, name: intCat.name },
+          });
+        }
+
+        for (const item of intCat.items) {
+          if (dbItemNames.has(item.name.toLowerCase())) continue; // DB version wins
+          await prisma.menuItem.create({
+            data: {
+              categoryId: category.id,
+              name: item.name,
+              description: item.description || null,
+              price: item.price,
+              status: 'ACTIVE',
+              source: posSource,
+            },
+          });
+        }
+      }
+      console.log(`[AutoSync] Cached POS menu items from ${posSource} into DB`);
+    } catch (cacheErr: any) {
+      console.error('[AutoSync] POS item caching failed (non-fatal):', cacheErr.message);
+    }
+  }
+
   // buildSystemPrompt handles de-duplication — DB items always win on name clash
   const systemPrompt = elevenlabs.buildSystemPrompt({
     name: business.name,
@@ -275,12 +336,20 @@ export const autoSyncAgent = async (businessId: string): Promise<number> => {
     transferNumber: agent.transferNumber ?? undefined,
   });
 
-  // Push to ElevenLabs — update system prompt, first message, and tools together
+  // Push to ElevenLabs — update system prompt, first message, TTS, and tools together
   await elevenlabs.updateAgent(agent.elevenlabsAgentId, {
     conversation_config: {
       agent: {
         prompt: { prompt: systemPrompt },
         ...(agent.openingGreeting ? { first_message: agent.openingGreeting } : {}),
+      },
+      tts: {
+        voice_id: agent.voiceId,
+        model_id: 'eleven_flash_v2_5',
+        stability: 0.3,
+        similarity_boost: 0.75,
+        style: 0.4,
+        speed: 1.0,
       },
     },
     tools,

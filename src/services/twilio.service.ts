@@ -210,14 +210,26 @@ export const detectCountryFromAddress = (address: string): string => {
 };
 
 // ─── Send SMS ─────────────────────────────────────────────────────────────────
+// Uses Messaging Service SID (alphanumeric sender "Talkativ") with fallback to phone number
 export const sendSms = async (to: string, body: string, fromNumber?: string): Promise<boolean> => {
   try {
+    const msgServiceSid = env.TWILIO_MESSAGING_SERVICE_SID;
+
+    if (msgServiceSid) {
+      // Preferred: send via Messaging Service (alphanumeric sender — works with voice-only numbers)
+      await client.messages.create({ to, body, messagingServiceSid: msgServiceSid });
+      console.log(`[Twilio] SMS sent via Messaging Service to ${to}`);
+      return true;
+    }
+
+    // Fallback: try a specific FROM number (only works if that number is SMS-capable)
     const from = fromNumber || env.TWILIO_PHONE_NUMBER || await getExistingNumber();
     if (!from) {
-      console.error('[Twilio] sendSms: no from number available');
+      console.error('[Twilio] sendSms: no from number and no Messaging Service configured');
       return false;
     }
     await client.messages.create({ to, from, body });
+    console.log(`[Twilio] SMS sent from ${from} to ${to}`);
     return true;
   } catch (e: any) {
     console.error('[Twilio] sendSms failed:', e.message);
