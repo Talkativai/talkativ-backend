@@ -529,11 +529,41 @@ export const stripeWebhook = asyncHandler(async (req: Request, res: Response) =>
       break;
     }
 
+    case 'customer.subscription.updated': {
+      const stripeSub = event.data.object as any;
+      const sub = await prisma.subscription.findFirst({ where: { stripeSubscriptionId: stripeSub.id } });
+      if (sub) {
+        const updateData: any = {
+          currentPeriodEnd: new Date(stripeSub.current_period_end * 1000),
+          cancelAtPeriodEnd: stripeSub.cancel_at_period_end ?? false,
+        };
+        // Map status
+        if (stripeSub.status === 'active') updateData.status = 'ACTIVE';
+        else if (stripeSub.status === 'past_due') updateData.status = 'PAST_DUE';
+        else if (stripeSub.status === 'trialing') updateData.status = 'TRIALING';
+        // If a pending plan was scheduled and the price now matches, activate it
+        if (sub.pendingPlan && sub.stripeScheduleId) {
+          const newPriceId = stripeSub.items?.data?.[0]?.price?.id;
+          const priceToplan: Record<string, string> = {};
+          if (env.STRIPE_GROWTH_PRICE_ID) priceToplan[env.STRIPE_GROWTH_PRICE_ID] = 'GROWTH';
+          if (env.STRIPE_PRO_PRICE_ID) priceToplan[env.STRIPE_PRO_PRICE_ID] = 'PRO';
+          if (newPriceId && priceToplan[newPriceId] === sub.pendingPlan) {
+            updateData.plan = sub.pendingPlan;
+            updateData.pendingPlan = null;
+            updateData.pendingPlanDate = null;
+            updateData.stripeScheduleId = null;
+          }
+        }
+        await prisma.subscription.update({ where: { id: sub.id }, data: updateData });
+      }
+      break;
+    }
+
     case 'customer.subscription.deleted': {
       const subscription = event.data.object as any;
       const sub = await prisma.subscription.findFirst({ where: { stripeSubscriptionId: subscription.id } });
       if (sub) {
-        await prisma.subscription.update({ where: { id: sub.id }, data: { status: 'CANCELLED' } });
+        await prisma.subscription.update({ where: { id: sub.id }, data: { status: 'CANCELLED', pendingPlan: null, pendingPlanDate: null, stripeScheduleId: null } });
       }
       break;
     }

@@ -339,7 +339,10 @@ model Subscription {
   businessId           String             @unique
   stripeCustomerId     String?
   stripeSubscriptionId String?
+  stripeScheduleId     String?
   plan                 PlanType           @default(GROWTH)
+  pendingPlan          PlanType?
+  pendingPlanDate      DateTime?
   status               SubscriptionStatus @default(TRIALING)
   trialEndsAt          DateTime?
   currentPeriodEnd     DateTime?

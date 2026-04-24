@@ -172,15 +172,37 @@ export const subscribe = asyncHandler(async (req: Request, res: Response) => {
 export const changePlan = asyncHandler(async (req: Request, res: Response) => {
   const businessId = req.user!.businessId;
   if (!businessId) throw ApiError.notFound('Business not found');
-  const subscription = await prisma.subscription.findUnique({ where: { businessId } });
-  if (!subscription?.stripeSubscriptionId) throw ApiError.badRequest('No active subscription');
 
-  await stripeService.changePlan(subscription.stripeSubscriptionId, req.body.priceId);
+  const { plan, priceId } = req.body;
+  if (!plan) throw ApiError.badRequest('Plan is required');
+
+  const subscription = await prisma.subscription.findUnique({ where: { businessId } });
+  if (!subscription) throw ApiError.notFound('No subscription found');
+
+  // Dev mode — no Stripe, just update plan immediately
+  if (!env.STRIPE_SECRET_KEY || !subscription.stripeSubscriptionId || !priceId?.startsWith('price_')) {
+    const updated = await prisma.subscription.update({
+      where: { id: subscription.id },
+      data: { plan, pendingPlan: null, pendingPlanDate: null, stripeScheduleId: null },
+    });
+    return res.json(updated);
+  }
+
+  // Schedule the plan change to take effect at end of current billing period
+  const { scheduleId, periodEnd } = await stripeService.changePlanAtPeriodEnd(
+    subscription.stripeSubscriptionId,
+    priceId,
+  );
 
   const updated = await prisma.subscription.update({
     where: { id: subscription.id },
-    data: { plan: req.body.plan },
+    data: {
+      pendingPlan: plan,
+      pendingPlanDate: new Date(periodEnd * 1000),
+      stripeScheduleId: scheduleId,
+    },
   });
+
   res.json(updated);
 });
 

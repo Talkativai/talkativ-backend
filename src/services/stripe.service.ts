@@ -50,12 +50,47 @@ export const cancelSubscription = async (subscriptionId: string) => {
   });
 };
 
-export const changePlan = async (subscriptionId: string, newPriceId: string) => {
-  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-  return stripe.subscriptions.update(subscriptionId, {
-    items: [{ id: subscription.items.data[0].id, price: newPriceId }],
-    proration_behavior: 'none',
+// Schedule the plan change to start at the end of the current billing period.
+// Returns the schedule ID and the Unix timestamp when the new plan kicks in.
+export const changePlanAtPeriodEnd = async (
+  subscriptionId: string,
+  newPriceId: string,
+): Promise<{ scheduleId: string; periodEnd: number }> => {
+  const sub = await stripe.subscriptions.retrieve(subscriptionId);
+  const periodEnd = sub.current_period_end;
+  const currentPriceId = sub.items.data[0].price.id;
+  const currentPhaseStart = sub.start_date;
+
+  // If a schedule already controls this subscription, update its phases
+  if (sub.schedule) {
+    const existingScheduleId = typeof sub.schedule === 'string' ? sub.schedule : (sub.schedule as any).id;
+    const existing = await stripe.subscriptionSchedules.retrieve(existingScheduleId);
+    const phaseStart = (existing.phases[0]?.start_date as number) ?? currentPhaseStart;
+    await stripe.subscriptionSchedules.update(existingScheduleId, {
+      phases: [
+        { items: [{ price: currentPriceId, quantity: 1 }], start_date: phaseStart, end_date: periodEnd },
+        { items: [{ price: newPriceId, quantity: 1 }], start_date: periodEnd },
+      ],
+      end_behavior: 'release',
+    });
+    return { scheduleId: existingScheduleId, periodEnd };
+  }
+
+  // Create a new schedule from the existing subscription (SDK v17: use from_subscription param)
+  const schedule = await (stripe.subscriptionSchedules as any).create({ from_subscription: subscriptionId });
+  await stripe.subscriptionSchedules.update(schedule.id, {
+    phases: [
+      {
+        items: [{ price: currentPriceId, quantity: 1 }],
+        start_date: (schedule.phases[0]?.start_date as number) ?? currentPhaseStart,
+        end_date: periodEnd,
+      },
+      { items: [{ price: newPriceId, quantity: 1 }], start_date: periodEnd },
+    ],
+    end_behavior: 'release',
   });
+
+  return { scheduleId: schedule.id, periodEnd };
 };
 
 // ─── Portal ──────────────────────────────────────────────────────────────────
