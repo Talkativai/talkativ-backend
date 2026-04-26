@@ -280,7 +280,7 @@ export const createAgent = async (config: {
         },
         tts: {
           voice_id: config.voiceId,
-          model_id: 'eleven_flash_v2_5',
+          model_id: 'eleven_turbo_v2_5',
           stability: 0.3,
           similarity_boost: 0.75,
           style: 0.4,

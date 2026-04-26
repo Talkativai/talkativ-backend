@@ -88,7 +88,7 @@ export const updateVoice = asyncHandler(async (req: Request, res: Response) => {
       conversation_config: {
         tts: {
           voice_id: req.body.voiceId,
-          model_id: 'eleven_flash_v2_5',
+          model_id: 'eleven_turbo_v2_5',
           stability: 0.3,
           similarity_boost: 0.75,
           style: 0.4,
@@ -345,7 +345,7 @@ export const autoSyncAgent = async (businessId: string): Promise<number> => {
       },
       tts: {
         voice_id: agent.voiceId,
-        model_id: 'eleven_flash_v2_5',
+        model_id: 'eleven_turbo_v2_5',
         stability: 0.3,
         similarity_boost: 0.75,
         style: 0.4,
