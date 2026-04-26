@@ -280,7 +280,8 @@ export const createAgent = async (config: {
         },
         tts: {
           voice_id: config.voiceId,
-          model_id: 'eleven_turbo_v2_5',
+          // model_id: 'eleven_turbo_v2_5', // Fails ElevenLabs Validation ("English Agents must use turbo or flash v2")
+          model_id: 'eleven_turbo_v2',
           stability: 0.3,
           similarity_boost: 0.75,
           style: 0.4,

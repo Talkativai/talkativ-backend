@@ -88,7 +88,8 @@ export const updateVoice = asyncHandler(async (req: Request, res: Response) => {
       conversation_config: {
         tts: {
           voice_id: req.body.voiceId,
-          model_id: 'eleven_turbo_v2_5',
+          // model_id: 'eleven_turbo_v2_5', // Fails ElevenLabs Validation ("English Agents must use turbo or flash v2")
+          model_id: 'eleven_turbo_v2',
           stability: 0.3,
           similarity_boost: 0.75,
           style: 0.4,
@@ -223,19 +224,32 @@ export const getSignedUrl = asyncHandler(async (req: Request, res: Response) => 
 
 // ─── Auto-Sync Helper (push latest menu + settings to ElevenLabs) ────────────
 export const autoSyncAgent = async (businessId: string): Promise<number> => {
-  const [business, agent, dbMenuCategories, faqs, orderingPolicy, reservationPolicy, orderingIntegration] = await Promise.all([
-    prisma.business.findUnique({ where: { id: businessId }, include: { agent: true } }),
-    prisma.agent.findUnique({ where: { businessId } }),
-    prisma.menuCategory.findMany({
-      where: { businessId },
-      include: { items: { where: { status: 'ACTIVE' }, orderBy: { name: 'asc' } } },
-      orderBy: { sortOrder: 'asc' },
-    }),
-    prisma.faq.findMany({ where: { businessId }, orderBy: { position: 'asc' } }),
-    prisma.orderingPolicy.findUnique({ where: { businessId } }),
-    prisma.reservationPolicy.findUnique({ where: { businessId } }),
-    prisma.integration.findFirst({ where: { businessId, name: { in: ['Square', 'Clover', 'Zettle'] }, status: 'CONNECTED' } }),
-  ]);
+//   const [business, agent, dbMenuCategories, faqs, orderingPolicy, reservationPolicy, orderingIntegration] = await Promise.all([
+//     prisma.business.findUnique({ where: { id: businessId }, include: { agent: true } }),
+//     prisma.agent.findUnique({ where: { businessId } }),
+//     prisma.menuCategory.findMany({
+//       where: { businessId },
+//       include: { items: { where: { status: 'ACTIVE' }, orderBy: { name: 'asc' } } },
+//       orderBy: { sortOrder: 'asc' },
+//     }),
+//     prisma.faq.findMany({ where: { businessId }, orderBy: { position: 'asc' } }),
+//     prisma.orderingPolicy.findUnique({ where: { businessId } }),
+//     prisma.reservationPolicy.findUnique({ where: { businessId } }),
+//     prisma.integration.findFirst({ where: { businessId, name: { in: ['Square', 'Clover', 'Zettle'] }, status: 'CONNECTED' } }),
+//   ]);
+
+  // Execute database queries sequentially to prevent connection pool exhaustion during startup or heavy edits
+  const business = await prisma.business.findUnique({ where: { id: businessId }, include: { agent: true } });
+  const agent = await prisma.agent.findUnique({ where: { businessId } });
+  const dbMenuCategories = await prisma.menuCategory.findMany({
+    where: { businessId },
+    include: { items: { where: { status: 'ACTIVE' }, orderBy: { name: 'asc' } } },
+    orderBy: { sortOrder: 'asc' },
+  });
+  const faqs = await prisma.faq.findMany({ where: { businessId }, orderBy: { position: 'asc' } });
+  const orderingPolicy = await prisma.orderingPolicy.findUnique({ where: { businessId } });
+  const reservationPolicy = await prisma.reservationPolicy.findUnique({ where: { businessId } });
+  const orderingIntegration = await prisma.integration.findFirst({ where: { businessId, name: { in: ['Square', 'Clover', 'Zettle'] }, status: 'CONNECTED' } });
 
   if (!business || !agent?.elevenlabsAgentId) {
     throw new Error('Agent not configured');
@@ -345,7 +359,8 @@ export const autoSyncAgent = async (businessId: string): Promise<number> => {
       },
       tts: {
         voice_id: agent.voiceId,
-        model_id: 'eleven_turbo_v2_5',
+        // model_id: 'eleven_turbo_v2_5', // Fails ElevenLabs Validation
+        model_id: 'eleven_turbo_v2',
         stability: 0.3,
         similarity_boost: 0.75,
         style: 0.4,
