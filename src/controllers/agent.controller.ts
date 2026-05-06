@@ -211,7 +211,7 @@ export const getSignedUrl = asyncHandler(async (req: Request, res: Response) => 
 
   // Fetch agent + all required data to build system prompt
   const agent = await prisma.agent.findUnique({ where: { businessId } });
-  if (!agent?.elevenlabsAgentId) throw ApiError.notFound('Agent not configured — complete onboarding first');
+  if (!agent) throw ApiError.notFound('Agent not configured — complete onboarding first');
 
   const [business, dbMenuCategories, faqs, orderingPolicy, reservationPolicy] = await Promise.all([
     prisma.business.findUnique({ where: { id: businessId }, include: { agent: true } }),
@@ -258,7 +258,7 @@ export const getSignedUrl = asyncHandler(async (req: Request, res: Response) => 
     firstMessage: agent.openingGreeting || '',
     voiceId: agent.voiceId,
     tools,
-    medium: { serverWebSocket: { inputSampleRate: 8000 } },
+    medium: { serverWebSocket: { inputSampleRate: 16000 } },
   });
 
   // Return as signedUrl for backward compatibility with the frontend
