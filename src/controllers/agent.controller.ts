@@ -252,11 +252,16 @@ export const getSignedUrl = asyncHandler(async (req: Request, res: Response) => 
     transferNumber: agent.transferNumber ?? undefined,
   });
 
+  // Ensure voiceId is a Cartesia UUID — old ElevenLabs IDs are alphanumeric (no hyphens)
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const DEFAULT_CARTESIA_VOICE = 'b7d50908-b17c-442d-ad8d-810c63997fd9'; // Sarah — Warm & professional
+  const voiceId = UUID_RE.test(agent.voiceId || '') ? agent.voiceId : DEFAULT_CARTESIA_VOICE;
+
   // Create an Ultravox call session for browser-based demo (serverWebSocket medium)
   const { joinUrl } = await elevenlabs.createCallSession({
     systemPrompt,
     firstMessage: agent.openingGreeting || '',
-    voiceId: agent.voiceId,
+    voiceId,
     tools,
     medium: { serverWebSocket: { inputSampleRate: 16000 } },
   });
