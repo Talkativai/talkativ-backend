@@ -267,7 +267,7 @@ export const getSignedUrl = asyncHandler(async (req: Request, res: Response) => 
       firstMessage: agent.openingGreeting || '',
       voiceId,
       tools,
-      medium: { serverWebSocket: { inputSampleRate: 48000 } },
+      medium: { webRtc: {} }, // webRTC medium — SDK v0.5.0 receives { roomUrl, token } over WebSocket then connects via LiveKit
     });
     console.log('[getSignedUrl] session created, joinUrl length:', joinUrl?.length);
     res.json({ signedUrl: joinUrl });
