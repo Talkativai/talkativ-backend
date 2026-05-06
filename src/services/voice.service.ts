@@ -234,9 +234,8 @@ export const createCallSession = async (config: {
   const body: Record<string, any> = {
     model: 'fixie-ai/ultravox',
     systemPrompt: config.systemPrompt,
-    // Prefix with Cartesia: so Ultravox routes TTS through Cartesia.
-    // Format: "Cartesia:<voice_id>" — see setup.md for details.
-    voice: `Cartesia:${config.voiceId}`,
+    // Ultravox native voice ID — pass directly, no prefix needed.
+    voice: config.voiceId,
     selectedTools: config.tools,
     firstSpeaker: 'FIRST_SPEAKER_AGENT',
     medium: config.medium || { twilio: {} },

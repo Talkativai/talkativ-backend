@@ -207,10 +207,12 @@ export const testCall = asyncHandler(async (req: Request, res: Response) => {
 
 export const getSignedUrl = asyncHandler(async (req: Request, res: Response) => {
   const businessId = req.user!.businessId;
+  console.log('[getSignedUrl] businessId:', businessId);
   if (!businessId) throw ApiError.notFound('Business not found');
 
   // Fetch agent + all required data to build system prompt
   const agent = await prisma.agent.findUnique({ where: { businessId } });
+  console.log('[getSignedUrl] agent:', agent?.id, 'voiceId:', agent?.voiceId);
   if (!agent) throw ApiError.notFound('Agent not configured — complete onboarding first');
 
   const [business, dbMenuCategories, faqs, orderingPolicy, reservationPolicy] = await Promise.all([
@@ -254,20 +256,25 @@ export const getSignedUrl = asyncHandler(async (req: Request, res: Response) => 
 
   // Ensure voiceId is a Cartesia UUID — old ElevenLabs IDs are alphanumeric (no hyphens)
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const DEFAULT_CARTESIA_VOICE = 'b7d50908-b17c-442d-ad8d-810c63997fd9'; // Sarah — Warm & professional
+  const DEFAULT_CARTESIA_VOICE = '33175488-b0f9-4f11-a0c6-3f4edd47353e'; // Gabrielle — Warm & professional (Ultravox)
   const voiceId = UUID_RE.test(agent.voiceId || '') ? agent.voiceId : DEFAULT_CARTESIA_VOICE;
+  console.log('[getSignedUrl] using voiceId:', voiceId, '| ULTRAVOX_API_KEY set:', !!process.env.ULTRAVOX_API_KEY);
 
-  // Create an Ultravox call session for browser-based demo (serverWebSocket medium)
-  const { joinUrl } = await elevenlabs.createCallSession({
-    systemPrompt,
-    firstMessage: agent.openingGreeting || '',
-    voiceId,
-    tools,
-    medium: { serverWebSocket: { inputSampleRate: 16000 } },
-  });
-
-  // Return as signedUrl for backward compatibility with the frontend
-  res.json({ signedUrl: joinUrl });
+  try {
+    // Create an Ultravox call session for browser-based demo (serverWebSocket medium)
+    const { joinUrl } = await elevenlabs.createCallSession({
+      systemPrompt,
+      firstMessage: agent.openingGreeting || '',
+      voiceId,
+      tools,
+      medium: { serverWebSocket: { inputSampleRate: 16000 } },
+    });
+    console.log('[getSignedUrl] session created, joinUrl length:', joinUrl?.length);
+    res.json({ signedUrl: joinUrl });
+  } catch (err: any) {
+    console.error('[getSignedUrl] createCallSession failed:', err.message);
+    res.status(500).json({ error: `Failed to start call session: ${err.message}` });
+  }
 });
 
 // ─── Auto-Sync Helper (push latest menu + settings to ElevenLabs) ────────────

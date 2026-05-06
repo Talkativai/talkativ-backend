@@ -2245,7 +2245,7 @@ export const twilioInboundCall = asyncHandler(async (req: Request, res: Response
 
   // Ensure voiceId is a Cartesia UUID — old ElevenLabs IDs are alphanumeric (no hyphens)
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const DEFAULT_CARTESIA_VOICE = 'b7d50908-b17c-442d-ad8d-810c63997fd9'; // Sarah — Warm & professional
+  const DEFAULT_CARTESIA_VOICE = '33175488-b0f9-4f11-a0c6-3f4edd47353e'; // Gabrielle — Warm & professional (Ultravox)
   const callVoiceId = UUID_RE.test(agent.voiceId || '') ? agent.voiceId : DEFAULT_CARTESIA_VOICE;
 
   try {
