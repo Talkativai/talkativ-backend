@@ -33,13 +33,13 @@ const envSchema = z.object({
 
   
 
-  // Google OAuth
-  GOOGLE_CLIENT_ID: z.string().default(''),
-  GOOGLE_CLIENT_SECRET: z.string().default(''),
-  GOOGLE_CALLBACK_URL: z.string().default('http://localhost:5000/auth/google/callback'),
+  // Google OAuth — commented out (OAuth removed; Google Places API kept separately)
+  // GOOGLE_CLIENT_ID: z.string().default(''),
+  // GOOGLE_CLIENT_SECRET: z.string().default(''),
+  // GOOGLE_CALLBACK_URL: z.string().default('http://localhost:5000/auth/google/callback'),
 
-  // Groq AI
-  GROQ_API_KEY: z.string().default(''),
+  // Groq AI — commented out (not used)
+  // GROQ_API_KEY: z.string().default(''),
 
   // Anthropic (Claude) API
   ANTHROPIC_API_KEY: z.string().default(''),

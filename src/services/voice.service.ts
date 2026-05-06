@@ -370,7 +370,7 @@ export const textToSpeech = async (voiceId: string, text: string): Promise<Buffe
 
   if (!res.ok) {
     const error = await res.text();
-    throw new Error(`Cartesia TTS failed: ${error}`);
+    throw new Error(`Cartesia TTS failed [${res.status}]: ${error}`);
   }
 
   const arrayBuffer = await res.arrayBuffer();

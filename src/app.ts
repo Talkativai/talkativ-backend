@@ -136,10 +136,8 @@ app.post('/api/public/demo-call', demoCallLimiter, async (req, res) => {
     return;
   }
 
-  if (!env.ELEVENLABS_DEMO_AGENT_ID) {
-    res.status(500).json({ error: 'Demo agent not configured' });
-    return;
-  }
+  // ELEVENLABS_DEMO_AGENT_ID removed — demo calls now use Ultravox
+  // if (!env.ELEVENLABS_DEMO_AGENT_ID) { res.status(500).json({ error: 'Demo agent not configured' }); return; }
 
   const result = await twilioService.makeDemoCall(phoneNumber);
 

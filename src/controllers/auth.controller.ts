@@ -5,7 +5,7 @@ import prisma from '../config/db.js';
 import { env } from '../config/env.js';
 import * as authService from '../services/auth.service.js';
 import * as emailService from '../services/email.service.js';
-import * as googleOAuth from '../services/google-oauth.service.js';
+// import * as googleOAuth from '../services/google-oauth.service.js'; // commented out — OAuth removed
 import jwt from 'jsonwebtoken';
 
 // Use SameSite=None;Secure when the frontend is on HTTPS (cross-site on Render, etc.)
@@ -24,7 +24,8 @@ const { maxAge: _omit, ...REFRESH_COOKIE_CLEAR_OPTIONS } = REFRESH_COOKIE_OPTION
 // const clerkClient = createClerkClient({ secretKey: env.CLERK_SECRET_KEY }); // commented out
 
 export const register = asyncHandler(async (req: Request, res: Response) => {
-  const { email, password, firstName, lastName, googleId } = req.body;
+  const { email, password, firstName, lastName } = req.body;
+  // const { googleId } = req.body; // commented out — OAuth removed
 
   // Check if user exists
   const existing = await prisma.user.findUnique({ where: { email } });
@@ -33,7 +34,6 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
   // Hash password & create user
   const passwordHash = await authService.hashPassword(password);
 
-  // Build the data object — only include googleId if actually provided
   const userData: any = {
     email,
     passwordHash,
@@ -41,18 +41,13 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
     lastName: lastName || '',
   };
 
-  if (googleId) {
-    userData.googleId = googleId;
-    userData.emailVerified = true;
-  }
+  // OAuth removed — googleId no longer accepted on register
+  // if (googleId) { userData.googleId = googleId; userData.emailVerified = true; }
 
   let user;
   try {
     user = await prisma.user.create({ data: userData });
   } catch (err: any) {
-    if (err.code === 'P2002' && err.meta?.target?.includes('googleId')) {
-      throw ApiError.conflict('This Google account is already linked to another user');
-    }
     throw err;
   }
 
@@ -259,62 +254,7 @@ export const staffLogin = asyncHandler(async (req: Request, res: Response) => {
   });
 });
 
-// ─── Google OAuth ─────────────────────────────────────────────────────────────
+// Google OAuth handlers removed — OAuth removed from this application
 
-export const googleAuthRedirect = asyncHandler(async (req: Request, res: Response) => {
-  const state = (req.query.state as string) || 'login';
-  const url = googleOAuth.getAuthUrl(state);
-  res.redirect(url);
-});
-
-export const googleAuthCallback = asyncHandler(async (req: Request, res: Response) => {
-  const { code } = req.query as { code: string };
-  if (!code) return res.redirect(`${env.FRONTEND_URL}/#/login?error=no_code`);
-
-  try {
-    const tokens = await googleOAuth.getTokens(code);
-    if (!tokens.access_token) throw new Error('No access token from Google');
-
-    const profile = await googleOAuth.getUserInfo(tokens.access_token);
-    const user = await googleOAuth.findOrCreateUser({
-      id: profile.id,
-      email: profile.email,
-      given_name: profile.given_name,
-      family_name: profile.family_name,
-    });
-
-    if (user.status === 'SUSPENDED') {
-      return res.redirect(`${env.FRONTEND_URL}/#/login?error=suspended`);
-    }
-
-    const jwtTokens = await authService.generateTokenPair(user);
-    await authService.createSession(
-      user.id,
-      req.headers['user-agent'] || 'Unknown',
-      req.ip || 'Unknown',
-      'Unknown',
-    );
-
-    const business = await prisma.business.findUnique({
-      where: { userId: user.id },
-      select: { onboardingDone: true, onboardingStep: true },
-    });
-
-    res.cookie('refresh_token', jwtTokens.refreshToken, REFRESH_COOKIE_OPTIONS);
-
-    // Send welcome email for brand-new Google users (best effort)
-    emailService.sendWelcomeEmail(user.email, user.firstName).catch(() => {});
-
-    const dest = user.role === 'ADMIN' ? '/#/admin'
-      : !business?.onboardingDone ? `/#/onboarding/${business?.onboardingStep || 1}`
-      : '/#/dashboard';
-
-    res.redirect(`${env.FRONTEND_URL}${dest}`);
-  } catch (err) {
-    console.error('[Google OAuth] Callback error:', err);
-    res.redirect(`${env.FRONTEND_URL}/#/login?error=oauth_failed`);
-  }
-});
-
-// ─── Clerk SSO Auth (commented out — using Google OAuth) ─────────────────────
+// ─── Clerk SSO Auth (commented out — OAuth removed) ──────────────────────────
 // export const clerkAuth = asyncHandler(async (req: Request, res: Response) => { ... });

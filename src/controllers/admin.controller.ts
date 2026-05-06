@@ -162,69 +162,8 @@ export const unsuspendUser = asyncHandler(async (req: Request, res: Response) =>
 export const getIntegrationStats = asyncHandler(async (_req: Request, res: Response) => {
   const results: Record<string, any> = {};
 
-  // ── ElevenLabs — agents from DB + subscription from API (best-effort) ──
-  await (async () => {
-    if (!env.ELEVENLABS_API_KEY) {
-      results.elevenlabs = { status: 'not_configured' };
-      return;
-    }
-    try {
-      // Agent list comes from our own DB — always reliable
-      const dbAgents = await prisma.agent.findMany({
-        where: { elevenlabsAgentId: { not: null } },
-        select: {
-          elevenlabsAgentId: true,
-          business: { select: { name: true } },
-        },
-      });
-
-      const agentList = dbAgents.map((a: any) => ({
-        agentId: a.elevenlabsAgentId,
-        name: a.business?.name ?? 'Unnamed',
-      }));
-
-      // Subscription data from ElevenLabs — best-effort, both endpoint variants
-      let sub: any = null;
-      for (const url of [
-        'https://api.elevenlabs.io/v1/user',
-        'https://api.elevenlabs.io/v1/user/subscription',
-      ]) {
-        try {
-          const res = await fetch(url, {
-            headers: { 'xi-api-key': env.ELEVENLABS_API_KEY },
-          });
-          console.log(`[ElevenLabs] ${url} → ${res.status}`);
-          if (res.ok) {
-            const data = await res.json() as any;
-            sub = data.subscription ?? data;
-            break;
-          }
-        } catch {}
-      }
-
-      const usedPct = sub?.character_limit > 0
-        ? Math.round((sub.character_count / sub.character_limit) * 100)
-        : null;
-
-      results.elevenlabs = {
-        status: 'connected',
-        tier: sub?.tier ?? null,
-        characterCount: sub?.character_count ?? null,
-        characterLimit: sub?.character_limit ?? null,
-        remainingCharacters: sub ? sub.character_limit - sub.character_count : null,
-        usedPercent: usedPct,
-        voiceCount: sub?.voice_count ?? null,
-        voiceLimit: sub?.voice_limit ?? null,
-        nextResetDate: sub?.next_character_count_reset_unix
-          ? new Date(sub.next_character_count_reset_unix * 1000).toISOString()
-          : null,
-        activeAgents: agentList.length,
-        agentList,
-      };
-    } catch (e: any) {
-      results.elevenlabs = { status: 'error', message: e.message };
-    }
-  })();
+  // ElevenLabs removed — replaced by Cartesia + Ultravox
+  results.elevenlabs = { status: 'not_configured' };
 
   // ── Twilio — balance, provisioned numbers, usage ──
   await (async () => {
