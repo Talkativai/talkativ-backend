@@ -8,10 +8,16 @@ const router = Router();
 // Stripe webhook needs raw body for signature verification
 router.post('/stripe', express.raw({ type: 'application/json' }), webhookLimiter, webhookController.stripeWebhook);
 
-// ElevenLabs webhook
+// ElevenLabs webhook (kept for backward compat — commented out when fully migrated)
 router.post('/elevenlabs', webhookLimiter, webhookController.elevenlabsWebhook);
 
-// Public tool endpoints (called by ElevenLabs during calls — no auth)
+// Twilio inbound call → creates Ultravox session and returns TwiML
+router.post('/public/twilio-inbound', webhookController.twilioInboundCall);
+
+// Transfer call tool (called by Ultravox agent to trigger Twilio call transfer)
+router.post('/public/transfer-call', webhookLimiter, webhookController.transferCall);
+
+// Public tool endpoints (called by Ultravox during calls — no auth)
 router.post('/public/catalogue-lookup', webhookLimiter, webhookController.catalogueLookup);
 router.post('/public/create-order', webhookLimiter, webhookController.createOrder);
 router.post('/public/check-availability', webhookLimiter, webhookController.checkAvailability);

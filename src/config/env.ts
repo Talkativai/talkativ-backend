@@ -13,15 +13,13 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('15m'),
   REFRESH_TOKEN_EXPIRES_IN: z.string().default('7d'),
 
-  ELEVENLABS_API_KEY: z.string().default(''),
+  // ELEVENLABS_API_KEY: z.string().default(''),  // commented out — replaced by Ultravox + Cartesia
+  ULTRAVOX_API_KEY: z.string().default(''),
+  CARTESIA_API_KEY: z.string().default(''),
   STRIPE_SECRET_KEY: z.string().default(''),
   STRIPE_PUBLIC_KEY: z.string().default(''),
   STRIPE_WEBHOOK_SECRET: z.string().default(''),
 
-  // SMTP_HOST: z.string().default('smtp.gmail.com'),  // removed — using Resend
-  // SMTP_PORT: z.coerce.number().default(587),        // removed — using Resend
-  // SMTP_USER: z.string().default(''),                // removed — using Resend
-  // SMTP_PASS: z.string().default(''),                // removed — using Resend
   RESEND_API_KEY: z.string().default(''),
   EMAIL_FROM: z.string().default('noreply@talkativ.io'),
   EMAIL_FROM_NAME: z.string().default('Talkativ'),
@@ -33,8 +31,7 @@ const envSchema = z.object({
   AUTH_LOGIN_HASH: z.string(),
   AUTH_REGISTER_HASH: z.string(),
 
-  // Clerk authentication (commented out — using Google OAuth)
-  // CLERK_SECRET_KEY: z.string().default(''),
+  
 
   // Google OAuth
   GOOGLE_CLIENT_ID: z.string().default(''),
@@ -78,8 +75,9 @@ const envSchema = z.object({
   TWILIO_ADDRESS_SID: z.string().default(''),
   TWILIO_MESSAGING_SERVICE_SID: z.string().default(''), // MG... SID — sends SMS via Messaging Service (alphanumeric sender)
 
-  // ElevenLabs demo agent
-  ELEVENLABS_DEMO_AGENT_ID: z.string().default(''),
+  // ElevenLabs demo agent — commented out, replaced by Ultravox (no equivalent needed)
+  // ELEVENLABS_DEMO_AGENT_ID: z.string().default(''),
+  // ULTRAVOX_DEMO_SYSTEM_PROMPT: not needed — system prompt is built from DB data per call
 
   // Stripe Connect (for businesses receiving payments via our platform)
   STRIPE_CONNECT_CLIENT_ID: z.string().default(''),

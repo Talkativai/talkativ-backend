@@ -10,7 +10,8 @@ export const makeDemoCall = async (
   fromNumber?: string
 ): Promise<{ success: boolean; callSid?: string; message?: string }> => {
   try {
-    const id = agentId || env.ELEVENLABS_DEMO_AGENT_ID;
+    // agentId is unused for Ultravox — the inbound webhook builds config on-the-fly
+    // const id = agentId || env.ELEVENLABS_DEMO_AGENT_ID;  // commented out — ElevenLabs
 
     // Use explicit from → env TWILIO_PHONE_NUMBER → first purchased number
     const from = fromNumber || env.TWILIO_PHONE_NUMBER || await getExistingNumber();
@@ -21,7 +22,8 @@ export const makeDemoCall = async (
     const call = await client.calls.create({
       to: toNumber,
       from,
-      url: `https://api.elevenlabs.io/twilio/inbound_call`,
+      // Route outbound demo calls through our backend inbound handler (Ultravox)
+      url: `${env.BACKEND_URL}/webhooks/public/twilio-inbound`,
       method: 'POST',
     });
 
@@ -105,10 +107,12 @@ export const buyPhoneNumber = async (countryCode: string = 'GB'): Promise<string
   }
 };
 
-// ─── Connect number to ElevenLabs agent ──────────────────────────────────────
+// ─── Connect number to Ultravox agent (via our backend inbound webhook) ──────
+// Previously pointed to ElevenLabs: https://api.elevenlabs.io/twilio/inbound_call
+// Now points to our backend, which creates Ultravox call sessions on demand.
 export const connectNumberToAgent = async (
   phoneNumber: string,
-  agentId: string
+  _agentId: string  // agentId unused — Ultravox builds config from DB on each call
 ): Promise<boolean> => {
   try {
     const numbers = await client.incomingPhoneNumbers.list({ phoneNumber });
@@ -118,13 +122,13 @@ export const connectNumberToAgent = async (
       return false;
     }
 
-    // ElevenLabs routes inbound calls based on the registered phone number.
-    // Use their inbound_call endpoint — ElevenLabs will look up the assigned agent.
+    // Route inbound calls to our backend — backend creates Ultravox session and returns TwiML
     await client.incomingPhoneNumbers(numbers[0].sid).update({
-      voiceUrl: `https://api.elevenlabs.io/twilio/inbound_call`,
+      voiceUrl: `${env.BACKEND_URL}/webhooks/public/twilio-inbound`,
       voiceMethod: 'POST',
     });
 
+    console.log(`[Twilio] Number ${phoneNumber} connected to Ultravox via backend webhook`);
     return true;
   } catch (e: any) {
     console.error('[Twilio] Connect number failed:', e.message);

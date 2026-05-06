@@ -2,7 +2,8 @@ import { Request, Response } from 'express';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/apiError.js';
 import prisma from '../config/db.js';
-import * as elevenlabs from '../services/elevenlabs.service.js';
+// import * as elevenlabs from '../services/elevenlabs.service.js';  // commented out — replaced
+import * as elevenlabs from '../services/voice.service.js';
 import * as twilioService from '../services/twilio.service.js';
 import * as emailService from '../services/email.service.js';
 

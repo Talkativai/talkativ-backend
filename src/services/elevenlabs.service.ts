@@ -1,3 +1,8 @@
+// ─── ElevenLabs Service — COMMENTED OUT ─────────────────────────────────────
+// Replaced by voice.service.ts (Ultravox for calls + Cartesia for TTS).
+// All code below is preserved for reference. Do NOT delete.
+
+/*
 import { env } from '../config/env.js';
 
 const BASE_URL = 'https://api.elevenlabs.io/v1';
@@ -682,3 +687,5 @@ OPENING GREETING:
 ${business.agent?.openingGreeting || business.greeting || `Hi, thanks for calling ${business.name}. How can I help you today?`}
 `;
 };
+
+*/

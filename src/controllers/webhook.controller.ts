@@ -11,7 +11,8 @@ import * as posService from '../services/pos.service.js';
 import * as resosService from '../services/resos.service.js';
 import crypto from 'crypto';
 import * as paymentProviders from '../services/payment-providers.service.js';
-import * as elevenlabsService from '../services/elevenlabs.service.js';
+// import * as elevenlabsService from '../services/elevenlabs.service.js';  // commented out — replaced
+import * as elevenlabsService from '../services/voice.service.js';
 import { getPlanFeatures } from '../utils/planFeatures.js';
 
 // ─── Helper: push reservation to whichever platform is connected ─────────────
@@ -90,7 +91,7 @@ async function resolveCallerPhone(
   });
   if (activeCall?.callerPhone) return activeCall.callerPhone;
 
-  // Fallback: fetch live from ElevenLabs API
+  // Fallback: fetch live from Ultravox API (was ElevenLabs API)
   if (conversationId) {
     try {
       const conv = await elevenlabsService.getConversation(conversationId);
@@ -2163,4 +2164,148 @@ export const getCallerHistory = asyncHandler(async (req: Request, res: Response)
       ? `Welcome back, ${name}! Last time you ordered ${lastOrder?.items?.split(',')[0]?.trim()} on ${lastOrder?.createdAt.toLocaleDateString('en-GB')}.`
       : `Welcome back, ${name}! Great to hear from you again.`,
   });
+});
+
+
+// In-memory map: Ultravox callId → Twilio CallSid (for active calls only)
+// Used by the transfer_call webhook to redirect the live Twilio call.
+const activeTwilioCallSids = new Map<string, string>();
+
+// ─── Twilio Inbound Call Handler (Ultravox) ───────────────────────────────────
+// Twilio posts here when an inbound call arrives. We create an Ultravox call
+// session and return TwiML that connects the caller to Ultravox via WebSocket.
+// The Twilio voice URL for each number must point to:
+//   POST <BACKEND_URL>/webhooks/public/twilio-inbound
+export const twilioInboundCall = asyncHandler(async (req: Request, res: Response) => {
+  const toNumber: string = req.body.To || req.body.Called || '';
+  const callerPhone: string = req.body.From || req.body.Caller || '';
+  const callSid: string = req.body.CallSid || '';
+
+  // Look up which business owns this Twilio number
+  const phoneConfig = await prisma.phoneConfig.findFirst({
+    where: { assignedNumber: toNumber },
+    include: { business: { include: { agent: true } } },
+  });
+
+  if (!phoneConfig?.business) {
+    // Unknown number — return TwiML that hangs up gracefully
+    res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response><Say>Sorry, this number is not configured. Goodbye.</Say><Hangup/></Response>`);
+    return;
+  }
+
+  const business = phoneConfig.business;
+  const agent = business.agent;
+
+  if (!agent) {
+    res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response><Say>This service is not yet configured. Please call back later.</Say><Hangup/></Response>`);
+    return;
+  }
+
+  // Build system prompt and tools fresh for this call
+  const [dbMenuCategories, faqs, orderingPolicy, reservationPolicy] = await Promise.all([
+    prisma.menuCategory.findMany({
+      where: { businessId: business.id },
+      include: { items: { where: { status: 'ACTIVE' }, orderBy: { name: 'asc' } } },
+      orderBy: { sortOrder: 'asc' },
+    }),
+    prisma.faq.findMany({ where: { businessId: business.id }, orderBy: { position: 'asc' } }),
+    prisma.orderingPolicy.findUnique({ where: { businessId: business.id } }),
+    prisma.reservationPolicy.findUnique({ where: { businessId: business.id } }),
+  ]);
+
+  const systemPrompt = elevenlabsService.buildSystemPrompt({
+    name: business.name,
+    type: business.type,
+    address: business.address,
+    openingHours: business.openingHours,
+    agentName: agent.name,
+    greeting: agent.openingGreeting,
+    currency: (business as any).currency,
+    menuCategories: dbMenuCategories,
+    faqs,
+    orderingPolicy,
+    reservationPolicy,
+    agent: {
+      transferEnabled: agent.transferEnabled,
+      transferNumber: agent.transferNumber ?? undefined,
+      openingGreeting: agent.openingGreeting,
+    },
+  });
+
+  const tools = elevenlabsService.buildAgentTools({
+    businessId: business.id,
+    transferEnabled: agent.transferEnabled,
+    transferNumber: agent.transferNumber ?? undefined,
+  });
+
+  let joinUrl: string;
+  let callId: string;
+
+  try {
+    const session = await elevenlabsService.createCallSession({
+      systemPrompt,
+      firstMessage: agent.openingGreeting || '',
+      voiceId: agent.voiceId,
+      tools,
+      medium: { twilio: {} },
+    });
+    joinUrl = session.joinUrl;
+    callId = session.callId;
+  } catch (err: any) {
+    console.error('[TwilioInbound] Ultravox session creation failed:', err.message);
+    res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response><Say>Sorry, our AI assistant is temporarily unavailable. Please try again later.</Say><Hangup/></Response>`);
+    return;
+  }
+
+  // Store Twilio callSid in memory so the transfer_call webhook can redirect it
+  if (callSid) activeTwilioCallSids.set(callId, callSid);
+
+  // Create call record in DB (use Ultravox callId in elevenlabsConvId for compatibility)
+  prisma.call.create({
+    data: {
+      businessId: business.id,
+      elevenlabsConvId: callId,
+      callerPhone: callerPhone || null,
+      status: 'LIVE',
+      startedAt: new Date(),
+    },
+  }).catch(e => console.error('[TwilioInbound] DB insert failed (non-fatal):', e.message));
+
+  // Return TwiML that streams audio to Ultravox
+  res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <Stream url="${joinUrl}"/>
+  </Connect>
+</Response>`);
+});
+
+// ─── Transfer Call Webhook (Ultravox tool → Twilio transfer) ─────────────────
+export const transferCall = asyncHandler(async (req: Request, res: Response) => {
+  const { conversation_id, transfer_to, business_id } = req.body;
+  if (!transfer_to || !conversation_id) {
+    res.status(400).json({ error: 'Missing transfer_to or conversation_id' });
+    return;
+  }
+
+  // Look up the live Twilio call SID from the in-memory map
+  const twilioCallSid = activeTwilioCallSids.get(conversation_id);
+
+  if (twilioCallSid) {
+    try {
+      const twilio = (await import('twilio')).default;
+      const client = twilio(env.TWILIO_ACCOUNT_SID, env.TWILIO_AUTH_TOKEN);
+      await client.calls(twilioCallSid).update({
+        twiml: `<Response><Dial>${transfer_to}</Dial></Response>`,
+      });
+      activeTwilioCallSids.delete(conversation_id); // clean up after transfer
+    } catch (e: any) {
+      console.error('[TransferCall] Twilio update failed:', e.message);
+    }
+  }
+
+  res.json({ success: true, transferred_to: transfer_to });
 });

@@ -1,3 +1,7 @@
+// ── Google OAuth service — commented out (OAuth removed) ──────────────────────
+// To re-enable: uncomment this file and restore routes in auth.routes.ts
+// and handlers in auth.controller.ts.
+/*
 import { OAuth2Client } from 'google-auth-library';
 import { env } from '../config/env.js';
 import prisma from '../config/db.js';
@@ -67,3 +71,6 @@ export const findOrCreateUser = async (profile: {
 
   return user;
 };
+*/
+
+export {};

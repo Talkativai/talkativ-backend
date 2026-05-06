@@ -2,7 +2,8 @@ import { Request, Response } from 'express';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/apiError.js';
 import prisma from '../config/db.js';
-import * as elevenlabs from '../services/elevenlabs.service.js';
+// import * as elevenlabs from '../services/elevenlabs.service.js';  // commented out — replaced
+import * as elevenlabs from '../services/voice.service.js';
 import * as posService from '../services/pos.service.js';
 import { AVAILABLE_VOICES } from '../utils/constants.js';
 import { env } from '../config/env.js';
@@ -207,19 +208,61 @@ export const testCall = asyncHandler(async (req: Request, res: Response) => {
 export const getSignedUrl = asyncHandler(async (req: Request, res: Response) => {
   const businessId = req.user!.businessId;
   if (!businessId) throw ApiError.notFound('Business not found');
+
+  // Fetch agent + all required data to build system prompt
   const agent = await prisma.agent.findUnique({ where: { businessId } });
   if (!agent?.elevenlabsAgentId) throw ApiError.notFound('Agent not configured — complete onboarding first');
 
-  const r = await fetch(
-    `https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${agent.elevenlabsAgentId}`,
-    { headers: { 'xi-api-key': env.ELEVENLABS_API_KEY } }
-  );
-  if (!r.ok) {
-    const err = await r.text();
-    throw new Error(`ElevenLabs signed URL failed: ${err}`);
-  }
-  const { signed_url } = await r.json() as { signed_url: string };
-  res.json({ signedUrl: signed_url });
+  const [business, dbMenuCategories, faqs, orderingPolicy, reservationPolicy] = await Promise.all([
+    prisma.business.findUnique({ where: { id: businessId }, include: { agent: true } }),
+    prisma.menuCategory.findMany({
+      where: { businessId },
+      include: { items: { where: { status: 'ACTIVE' }, orderBy: { name: 'asc' } } },
+      orderBy: { sortOrder: 'asc' },
+    }),
+    prisma.faq.findMany({ where: { businessId }, orderBy: { position: 'asc' } }),
+    prisma.orderingPolicy.findUnique({ where: { businessId } }),
+    prisma.reservationPolicy.findUnique({ where: { businessId } }),
+  ]);
+
+  if (!business) throw ApiError.notFound('Business not found');
+
+  const systemPrompt = elevenlabs.buildSystemPrompt({
+    name: business.name,
+    type: business.type,
+    address: business.address,
+    openingHours: business.openingHours,
+    agentName: agent.name,
+    greeting: agent.openingGreeting,
+    currency: (business as any).currency,
+    menuCategories: dbMenuCategories,
+    faqs,
+    orderingPolicy,
+    reservationPolicy,
+    agent: {
+      transferEnabled: agent.transferEnabled,
+      transferNumber: agent.transferNumber ?? undefined,
+      openingGreeting: agent.openingGreeting,
+    },
+  });
+
+  const tools = elevenlabs.buildAgentTools({
+    businessId,
+    transferEnabled: agent.transferEnabled,
+    transferNumber: agent.transferNumber ?? undefined,
+  });
+
+  // Create an Ultravox call session for browser-based demo (serverWebSocket medium)
+  const { joinUrl } = await elevenlabs.createCallSession({
+    systemPrompt,
+    firstMessage: agent.openingGreeting || '',
+    voiceId: agent.voiceId,
+    tools,
+    medium: { serverWebSocket: { inputSampleRate: 8000 } },
+  });
+
+  // Return as signedUrl for backward compatibility with the frontend
+  res.json({ signedUrl: joinUrl });
 });
 
 // ─── Auto-Sync Helper (push latest menu + settings to ElevenLabs) ────────────
@@ -486,18 +529,16 @@ export const previewVoice = async (req: Request, res: Response) => {
     res.json({ audio: audioBuffer.toString('base64') });
   } catch (err: any) {
     const raw = err?.message || '';
-    console.error('[previewVoice] ElevenLabs error:', raw);
+    console.error('[previewVoice] Cartesia TTS error:', raw);
 
     let userMessage = 'Voice preview is currently unavailable.';
 
-    if (raw.includes('detected_unusual_activity')) {
-      userMessage = 'ElevenLabs free tier is restricted on this account. Please upgrade to a paid ElevenLabs plan to use voice preview.';
-    } else if (raw.includes('401') || raw.toLowerCase().includes('invalid_api_key') || raw.toLowerCase().includes('unauthorized')) {
-      userMessage = 'ElevenLabs API key is invalid — check ELEVENLABS_API_KEY in your .env file.';
+    if (raw.includes('401') || raw.toLowerCase().includes('invalid_api_key') || raw.toLowerCase().includes('unauthorized')) {
+      userMessage = 'Cartesia API key is invalid — check CARTESIA_API_KEY in your .env file.';
     } else if (raw.includes('429')) {
-      userMessage = 'ElevenLabs rate limit reached — try again in a moment.';
-    } else if (raw.includes('422')) {
-      userMessage = 'This voice is not available on your ElevenLabs plan.';
+      userMessage = 'Cartesia rate limit reached — try again in a moment.';
+    } else if (raw.includes('404') || raw.toLowerCase().includes('voice not found')) {
+      userMessage = 'This voice ID is not found in your Cartesia account. Check setup.md for how to get valid voice IDs.';
     }
 
     res.status(400).json({ error: userMessage });

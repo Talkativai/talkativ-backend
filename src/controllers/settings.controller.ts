@@ -4,7 +4,8 @@ import { ApiError } from '../utils/apiError.js';
 import prisma from '../config/db.js';
 import * as authService from '../services/auth.service.js';
 import * as emailService from '../services/email.service.js';
-import * as elevenlabs from '../services/elevenlabs.service.js';
+// import * as elevenlabs from '../services/elevenlabs.service.js';  // commented out — replaced
+import * as elevenlabs from '../services/voice.service.js';
 import * as twilioService from '../services/twilio.service.js';
 import { autoSyncAgent } from './agent.controller.js';
 import crypto from 'crypto';
@@ -68,8 +69,8 @@ export const updatePhoneConfig = asyncHandler(async (req: Request, res: Response
 });
 
 // ─── Reconnect Phone ─────────────────────────────────────────────────────────
-// Re-registers the business's Twilio number with ElevenLabs and re-sets the
-// Twilio voice webhook. Fixes "application error" on existing numbers.
+// Re-configures the business's Twilio number to point to the Ultravox inbound
+// webhook. Fixes "application error" on existing numbers.
 export const reconnectPhone = asyncHandler(async (req: Request, res: Response) => {
   const businessId = req.user!.businessId;
   if (!businessId) throw ApiError.notFound('Business not found');
@@ -80,16 +81,15 @@ export const reconnectPhone = asyncHandler(async (req: Request, res: Response) =
   ]);
 
   if (!phoneConfig?.assignedNumber) throw ApiError.badRequest('No phone number assigned to this account');
-  if (!agent?.elevenlabsAgentId) throw ApiError.badRequest('No ElevenLabs agent found — complete onboarding first');
+  if (!agent?.elevenlabsAgentId) throw ApiError.badRequest('No voice agent found — complete onboarding first');
 
-  const phoneNumberId = await elevenlabs.registerPhoneNumber(phoneConfig.assignedNumber, agent.elevenlabsAgentId);
+  await elevenlabs.registerPhoneNumber(phoneConfig.assignedNumber, agent.elevenlabsAgentId);
   await twilioService.connectNumberToAgent(phoneConfig.assignedNumber, agent.elevenlabsAgentId);
 
   res.json({
     success: true,
     phoneNumber: phoneConfig.assignedNumber,
     agentId: agent.elevenlabsAgentId,
-    elevenLabsPhoneId: phoneNumberId,
   });
 });
 
