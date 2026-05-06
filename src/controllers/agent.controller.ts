@@ -267,7 +267,7 @@ export const getSignedUrl = asyncHandler(async (req: Request, res: Response) => 
       firstMessage: agent.openingGreeting || '',
       voiceId,
       tools,
-      medium: { serverWebSocket: { inputSampleRate: 16000 } },
+      medium: { serverWebSocket: {} },
     });
     console.log('[getSignedUrl] session created, joinUrl length:', joinUrl?.length);
     res.json({ signedUrl: joinUrl });
