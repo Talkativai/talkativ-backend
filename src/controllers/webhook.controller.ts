@@ -783,28 +783,41 @@ function normaliseUKPostcode(raw: string): string {
   return raw;
 }
 
-const geocodePostalCode = async (postalCode: string) => {
-  const normalised = normaliseUKPostcode(postalCode);
+const geocodePostalCode = async (addressOrPostcode: string) => {
+  // Extract a UK postcode from a full address (e.g. "545 Attercliffe Rd, Sheffield S9 3RA" → "S9 3RA")
+  const postcodeMatch = addressOrPostcode.match(/[A-Z]{1,2}\d{1,2}[A-Z]?\s*\d[A-Z]{2}/i);
+  const postcode = postcodeMatch
+    ? postcodeMatch[0].replace(/\s+/g, '').toUpperCase()
+    : normaliseUKPostcode(addressOrPostcode).replace(/\s+/g, '');
+
+  // Primary: postcodes.io — free, no API key, UK only
   try {
-    const apiKey = env.GOOGLE_PLACES_API;
-    if (!apiKey) {
-      console.error("GOOGLE_PLACES_API key not configured");
-      return null;
-    }
-    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(normalised)}&key=${apiKey}`;
-    const response = await fetch(url);
-    const data = await response.json() as any;
-    if (data.status === 'OK' && data.results?.length > 0) {
-      const result = data.results[0];
-      const { lat, lng } = result.geometry.location;
-      return { lat, lon: lng, formatted: result.formatted_address };
-    }
-    if (data.status !== 'ZERO_RESULTS') {
-      console.error("Geocoding error:", data.status, data.error_message);
+    const pcRes = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(postcode)}`);
+    const pcData = await pcRes.json() as any;
+    if (pcData.status === 200 && pcData.result) {
+      return { lat: pcData.result.latitude, lon: pcData.result.longitude, formatted: pcData.result.postcode };
     }
   } catch (e) {
-    console.error("Geocoding error", e);
+    console.error('[Geocoding] postcodes.io error:', e);
   }
+
+  // Fallback: Google Geocoding if API key is configured
+  const apiKey = (env as any).GOOGLE_PLACES_API;
+  if (apiKey) {
+    try {
+      const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(addressOrPostcode)}&key=${apiKey}`;
+      const response = await fetch(url);
+      const data = await response.json() as any;
+      if (data.status === 'OK' && data.results?.length > 0) {
+        const result = data.results[0];
+        const { lat, lng } = result.geometry.location;
+        return { lat, lon: lng, formatted: result.formatted_address };
+      }
+    } catch (e) {
+      console.error('[Geocoding] Google error:', e);
+    }
+  }
+
   return null;
 };
 
