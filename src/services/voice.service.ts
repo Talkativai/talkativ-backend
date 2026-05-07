@@ -230,6 +230,7 @@ export const createCallSession = async (config: {
   voiceId: string;
   tools: any[];
   medium?: Record<string, any>;
+  callEndedWebhookUrl?: string;
 }): Promise<{ callId: string; joinUrl: string }> => {
   const body: Record<string, any> = {
     model: 'fixie-ai/ultravox',
@@ -243,6 +244,10 @@ export const createCallSession = async (config: {
 
   if (config.firstMessage) {
     body.initialMessages = [{ role: 'MESSAGE_ROLE_AGENT', text: config.firstMessage }];
+  }
+
+  if (config.callEndedWebhookUrl) {
+    body.callEndedWebhookUrl = config.callEndedWebhookUrl;
   }
 
   const res = await fetch(`${ULTRAVOX_BASE_URL}/calls`, {

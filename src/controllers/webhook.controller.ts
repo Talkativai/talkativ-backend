@@ -882,13 +882,14 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
     delivery_address,
   } = req.body;
 
-  const customer_phone = await resolveCallerPhone(conversation_id, business_id, req.body.customer_phone);
-
-  // Check business hours before accepting order
-  const business = await prisma.business.findUnique({
-    where: { id: business_id },
-    include: { orderingPolicy: true, integrations: true, notifSettings: true, subscription: true },
-  });
+  // Run caller phone resolution and business lookup in parallel to save ~500ms
+  const [customer_phone, business] = await Promise.all([
+    resolveCallerPhone(conversation_id, business_id, req.body.customer_phone),
+    prisma.business.findUnique({
+      where: { id: business_id },
+      include: { orderingPolicy: true, integrations: true, notifSettings: true, subscription: true },
+    }),
+  ]);
   if (!business) {
     res.json({ error: true, message: "I'm sorry, our ordering service isn't available right now. Kindly try again later." });
     return;
@@ -968,23 +969,30 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
-  // Calculate amount from items (basic — in production, look up actual prices)
+  const orderType = type?.toUpperCase() || 'DELIVERY';
+
+  // Load all active menu items + live call in parallel (single batch instead of N sequential queries)
+  const [allMenuItems, activeCall] = await Promise.all([
+    prisma.menuItem.findMany({
+      where: { category: { businessId: business_id }, status: 'ACTIVE' },
+      select: { name: true, price: true },
+    }),
+    prisma.call.findFirst({
+      where: { businessId: business_id, status: 'LIVE' },
+      orderBy: { createdAt: 'desc' },
+    }),
+  ]);
+
+  // Calculate total from pre-fetched menu items (no additional DB calls)
   let totalAmount = 0;
   if (typeof items === 'string') {
-    // Try to parse from menu
     const itemNames = items.split(',').map((i: string) => i.trim());
     for (const rawName of itemNames) {
-      // Strip leading quantity prefix like "2x " or "2 x " before looking up the item
       const itemName = rawName.replace(/^\d+\s*[xX]\s*/, '').trim();
-      const menuItem = await prisma.menuItem.findFirst({
-        where: {
-          category: { businessId: business_id },
-          name: { contains: itemName, mode: 'insensitive' },
-          status: 'ACTIVE',
-        },
-      });
+      const menuItem = allMenuItems.find(
+        m => m.name.toLowerCase().includes(itemName.toLowerCase()),
+      );
       if (menuItem) {
-        // Parse quantity from prefix (e.g. "2x Edikaikong" → qty 2), default 1
         const qtyMatch = rawName.match(/^(\d+)\s*[xX]\s*/);
         const qty = qtyMatch ? parseInt(qtyMatch[1], 10) : 1;
         totalAmount += Number(menuItem.price) * qty;
@@ -992,18 +1000,11 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
-  const orderType = type?.toUpperCase() || 'DELIVERY';
   let deliveryFee = 0;
   if (orderType === 'DELIVERY' && business.orderingPolicy?.deliveryFee) {
     deliveryFee = Number(business.orderingPolicy.deliveryFee);
     totalAmount += deliveryFee;
   }
-
-  // Find the most recent LIVE call for this business to link it
-  const activeCall = await prisma.call.findFirst({
-    where: { businessId: business_id, status: 'LIVE' },
-    orderBy: { createdAt: 'desc' },
-  });
 
   const order = await prisma.order.create({
     data: {
@@ -1023,51 +1024,12 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
     },
   });
 
-  // Update call outcome type to ORDER
+  // Call outcome update — fire and forget, doesn't affect response
   if (activeCall) {
-    await prisma.call.update({
+    prisma.call.update({
       where: { id: activeCall.id },
       data: { outcomeType: 'ORDER', outcome: `Order #${order.id.slice(0, 8)}` },
-    });
-  }
-
-  // ── Push order to POS (Clover / Square) if integration is connected ──────────
-  if (orderingIntegration) {
-    try {
-      const parsedItems = posService.parseItemString(items);
-      // Resolve prices from DB for each item
-      const lineItems: posService.PosLineItem[] = [];
-      for (const parsed of parsedItems) {
-        const menuItem = await prisma.menuItem.findFirst({
-          where: { category: { businessId: business_id }, name: { contains: parsed.name, mode: 'insensitive' }, status: 'ACTIVE' },
-        });
-        lineItems.push({
-          name: parsed.name,
-          quantity: parsed.quantity,
-          unitPriceMinor: menuItem ? Math.round(Number(menuItem.price) * 100) : 0,
-        });
-      }
-
-      const posResult = await posService.pushOrderToPOS(orderingIntegration, {
-        ourOrderId: order.id,
-        customerName: customer_name,
-        customerPhone: customer_phone || null,
-        orderType: orderType as 'DELIVERY' | 'COLLECTION',
-        deliveryAddress: delivery_address || null,
-        notes: notes || null,
-        allergies: allergies || null,
-        lineItems,
-        currency: (business as any).currency || 'GBP',
-      });
-
-      if (posResult) {
-        await prisma.order.update({ where: { id: order.id }, data: { posOrderId: posResult.posOrderId } });
-        console.log(`[POS] Order pushed to ${posResult.posSystem} — POS ID: ${posResult.posOrderId}`);
-      }
-    } catch (posErr) {
-      // Non-fatal — order is saved in our DB, POS push is best-effort
-      console.error('[POS] Failed to push order to POS:', posErr);
-    }
+    }).catch(e => console.error('[createOrder] call update failed:', e.message));
   }
 
   let paymentLink: string | null = null;
@@ -1139,29 +1101,83 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
 
       if (paymentLink) {
         await prisma.order.update({ where: { id: order.id }, data: { paymentLinkUrl: paymentLink, paymentProvider: providerName } });
-        if (customer_phone && twilioService.isValidPhoneNumber(customer_phone)) {
-          const currency = (business as any).currency || 'GBP';
-          const symbol = currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : '$';
-          const smsBody = `Hi ${customer_name}, here is your payment link for your order at ${business.name}:\n\nTotal: ${symbol}${totalAmount.toFixed(2)}\nItems: ${items}\n\nPay here: ${paymentLink}`;
-          twilioService.sendSms(customer_phone, smsBody).catch(err => console.error('[SMS] Failed to send payment link:', err));
-          paymentLinkSent = true;
-        }
+        // Mark as sent — background block will send the actual SMS
+        paymentLinkSent = !!(customer_phone && twilioService.isValidPhoneNumber(customer_phone));
       }
     } catch (payErr) {
       console.error('[Payment] Failed to create payment link:', payErr);
     }
-  } else if (customer_phone && twilioService.isValidPhoneNumber(customer_phone)) {
-    // Send order confirmation SMS for pay on delivery/collection
-    const smsBody = `Hi ${customer_name}, your order at ${business.name} is confirmed!\n\nItems: ${items}${deliveryFee > 0 ? `\nDelivery fee: £${deliveryFee.toFixed(2)}` : ''}\nTotal: £${totalAmount.toFixed(2)}\nPayment: on ${orderType === 'DELIVERY' ? 'delivery' : 'collection'}${allergies ? `\n\n⚠️ Allergies noted: ${allergies}` : ''}`;
-    twilioService.sendSms(customer_phone, smsBody).catch(err => console.error('[SMS] Failed to send order confirmation:', err));
   }
 
-  // Build allergy warning for staff
   const allergyWarning = allergies
     ? `\n⚠️ ALLERGY ALERT: Customer has reported the following allergies: ${allergies}. Please ensure all items are safe and inform kitchen staff.`
     : '';
 
-  // Send business notification email
+  // Respond immediately — POS push, email, and SMS happen in background
+  res.json({
+    order_id: order.id,
+    confirmation: `Order created successfully!${allergyWarning}`,
+    allergies: allergies || null,
+    payment_method: payment_method || 'pay_on_delivery',
+    payment_link: paymentLink,
+    payment_link_sent: paymentLinkSent,
+    payment_note: !paymentLinkSent && payment_method === 'pay_now'
+      ? 'No payment integration is connected — a payment link could not be sent. Tell the customer their order is confirmed and payment will be collected on delivery or collection instead.'
+      : undefined,
+    total: totalAmount,
+  });
+
+  // ── Background tasks (run after response is sent) ────────────────────────────
+  // POS push — can take 1-3s; moved here so it doesn't block the tool response
+  if (orderingIntegration) {
+    void (async () => {
+      try {
+        const parsedItems = posService.parseItemString(items);
+        const lineItems: posService.PosLineItem[] = parsedItems.map((parsed: any) => {
+          const menuItem = allMenuItems.find(
+            m => m.name.toLowerCase().includes(parsed.name.toLowerCase()),
+          );
+          return {
+            name: parsed.name,
+            quantity: parsed.quantity,
+            unitPriceMinor: menuItem ? Math.round(Number(menuItem.price) * 100) : 0,
+          };
+        });
+        const posResult = await posService.pushOrderToPOS(orderingIntegration, {
+          ourOrderId: order.id,
+          customerName: customer_name,
+          customerPhone: customer_phone || null,
+          orderType: orderType as 'DELIVERY' | 'COLLECTION',
+          deliveryAddress: delivery_address || null,
+          notes: notes || null,
+          allergies: allergies || null,
+          lineItems,
+          currency: (business as any).currency || 'GBP',
+        });
+        if (posResult) {
+          await prisma.order.update({ where: { id: order.id }, data: { posOrderId: posResult.posOrderId } });
+          console.log(`[POS] Order pushed to ${posResult.posSystem} — POS ID: ${posResult.posOrderId}`);
+        }
+      } catch (posErr) {
+        console.error('[POS] Failed to push order to POS:', posErr);
+      }
+    })();
+  }
+
+  // Confirmation/payment SMS
+  if (customer_phone && twilioService.isValidPhoneNumber(customer_phone)) {
+    if (paymentLink && paymentLinkSent) {
+      const currency = (business as any).currency || 'GBP';
+      const symbol = currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : '$';
+      const smsBody = `Hi ${customer_name}, here is your payment link for your order at ${business.name}:\n\nTotal: ${symbol}${totalAmount.toFixed(2)}\nItems: ${items}\n\nPay here: ${paymentLink}`;
+      twilioService.sendSms(customer_phone, smsBody).catch(err => console.error('[SMS] Failed to send payment link:', err));
+    } else if (payment_method !== 'pay_now') {
+      const smsBody = `Hi ${customer_name}, your order at ${business.name} is confirmed!\n\nItems: ${items}${deliveryFee > 0 ? `\nDelivery fee: £${deliveryFee.toFixed(2)}` : ''}\nTotal: £${totalAmount.toFixed(2)}\nPayment: on ${orderType === 'DELIVERY' ? 'delivery' : 'collection'}${allergies ? `\n\n⚠️ Allergies noted: ${allergies}` : ''}`;
+      twilioService.sendSms(customer_phone, smsBody).catch(err => console.error('[SMS] Failed to send order confirmation:', err));
+    }
+  }
+
+  // Business notification email
   if (business.notifSettings?.emailNewOrder !== false && business.email) {
     emailService.sendBusinessNewOrderAlert(business.email, business.name, {
       id: order.id,
@@ -1176,22 +1192,9 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
       deliveryFee: deliveryFee,
       total: totalAmount,
       paymentMethod: payment_method || 'pay_on_delivery',
-      paymentStatus: 'pending'
+      paymentStatus: 'pending',
     }).catch(err => console.error('Failed to send business new order alert:', err));
   }
-
-  res.json({
-    order_id: order.id,
-    confirmation: `Order created successfully!${allergyWarning}`,
-    allergies: allergies || null,
-    payment_method: payment_method || 'pay_on_delivery',
-    payment_link: paymentLink,
-    payment_link_sent: paymentLinkSent,
-    payment_note: !paymentLinkSent && payment_method === 'pay_now'
-      ? 'No payment integration is connected — a payment link could not be sent. Tell the customer their order is confirmed and payment will be collected on delivery or collection instead.'
-      : undefined,
-    total: totalAmount,
-  });
 });
 
 // ─── Helper: generate unique Talkativ reference (TLK-XXXX) ───────────────────
@@ -2255,6 +2258,7 @@ export const twilioInboundCall = asyncHandler(async (req: Request, res: Response
       voiceId: callVoiceId,
       tools,
       medium: { twilio: {} },
+      callEndedWebhookUrl: `${env.BACKEND_URL}/webhooks/public/ultravox-call-ended`,
     });
     joinUrl = session.joinUrl;
     callId = session.callId;
@@ -2286,6 +2290,51 @@ export const twilioInboundCall = asyncHandler(async (req: Request, res: Response
     <Stream url="${joinUrl}"/>
   </Connect>
 </Response>`);
+});
+
+// ─── Ultravox Call Ended Webhook ──────────────────────────────────────────────
+// Ultravox POSTs here when a call ends (set via callEndedWebhookUrl at call creation).
+// Saves transcript and marks the call COMPLETED in the DB.
+export const ultravoxCallEnded = asyncHandler(async (req: Request, res: Response) => {
+  res.json({ received: true }); // Respond immediately — Ultravox doesn't wait
+
+  const body = req.body;
+  const callId: string | undefined = body.callId;
+  if (!callId) return;
+
+  // Format transcript — Ultravox uses role "MESSAGE_ROLE_AGENT"/"MESSAGE_ROLE_USER"
+  const rawTranscript: any[] = body.transcript || [];
+  const transcript = rawTranscript.length > 0
+    ? rawTranscript
+        .map((t: any) => {
+          const role = (t.role || t.speaker || '').toLowerCase();
+          const isAgent = role.includes('agent');
+          const text = t.text || t.message || '';
+          return text ? `${isAgent ? 'Agent' : 'Caller'}: ${text}` : null;
+        })
+        .filter(Boolean)
+        .join('\n')
+    : null;
+
+  const summary: string | null = body.summary || null;
+
+  try {
+    // Find the call record by Ultravox callId (stored in elevenlabsConvId)
+    const existing = await prisma.call.findFirst({ where: { elevenlabsConvId: callId } });
+    if (existing) {
+      await prisma.call.update({
+        where: { id: existing.id },
+        data: {
+          status: 'COMPLETED',
+          endedAt: existing.endedAt || new Date(),
+          transcript: transcript || existing.transcript,
+          outcome: existing.outcome || summary,
+        },
+      });
+    }
+  } catch (err: any) {
+    console.error('[UltravoxCallEnded] DB update failed:', err.message);
+  }
 });
 
 // ─── Transfer Call Webhook (Ultravox tool → Twilio transfer) ─────────────────

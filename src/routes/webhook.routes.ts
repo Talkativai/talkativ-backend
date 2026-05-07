@@ -14,6 +14,9 @@ router.post('/elevenlabs', webhookLimiter, webhookController.elevenlabsWebhook);
 // Twilio inbound call → creates Ultravox session and returns TwiML
 router.post('/public/twilio-inbound', webhookController.twilioInboundCall);
 
+// Ultravox post-call hook — saves transcript when a call ends
+router.post('/public/ultravox-call-ended', webhookController.ultravoxCallEnded);
+
 // Transfer call tool (called by Ultravox agent to trigger Twilio call transfer)
 router.post('/public/transfer-call', webhookLimiter, webhookController.transferCall);
 
