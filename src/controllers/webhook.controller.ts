@@ -791,14 +791,23 @@ const geocodePostalCode = async (addressOrPostcode: string) => {
     : normaliseUKPostcode(addressOrPostcode).replace(/\s+/g, '');
 
   // Primary: postcodes.io — free, no API key, UK only
+  const buildPostcodesResult = (r: any) => {
+    const area = [r.admin_ward, r.admin_district].filter(Boolean).join(', ') || r.postcode;
+    return { lat: r.latitude, lon: r.longitude, formatted: r.postcode, area };
+  };
   try {
+    // Direct lookup first
     const pcRes = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(postcode)}`);
     const pcData = await pcRes.json() as any;
     if (pcData.status === 200 && pcData.result) {
-      const r = pcData.result;
-      // Build a human-readable area name, e.g. "City, Sheffield" or just "Sheffield"
-      const area = [r.admin_ward, r.admin_district].filter(Boolean).join(', ') || r.postcode;
-      return { lat: r.latitude, lon: r.longitude, formatted: r.postcode, area };
+      return buildPostcodesResult(pcData.result);
+    }
+    // Not found — try fuzzy query (handles cases where the AI mis-parsed the postcode,
+    // e.g. "S121EL" from "S12 1EL" which should resolve to "S1 2EL")
+    const qRes = await fetch(`https://api.postcodes.io/postcodes?q=${encodeURIComponent(postcode)}&limit=1`);
+    const qData = await qRes.json() as any;
+    if (qData.status === 200 && qData.result?.length > 0) {
+      return buildPostcodesResult(qData.result[0]);
     }
   } catch (e) {
     console.error('[Geocoding] postcodes.io error:', e);
