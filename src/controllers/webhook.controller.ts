@@ -795,7 +795,10 @@ const geocodePostalCode = async (addressOrPostcode: string) => {
     const pcRes = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(postcode)}`);
     const pcData = await pcRes.json() as any;
     if (pcData.status === 200 && pcData.result) {
-      return { lat: pcData.result.latitude, lon: pcData.result.longitude, formatted: pcData.result.postcode };
+      const r = pcData.result;
+      // Build a human-readable area name, e.g. "City, Sheffield" or just "Sheffield"
+      const area = [r.admin_ward, r.admin_district].filter(Boolean).join(', ') || r.postcode;
+      return { lat: r.latitude, lon: r.longitude, formatted: r.postcode, area };
     }
   } catch (e) {
     console.error('[Geocoding] postcodes.io error:', e);
@@ -863,7 +866,15 @@ const verifyDeliveryEligibility = async (business: any, customer_postal_code: st
     }
   }
 
-  return { eligible: true, not_found: false, formatted_address: custGeo.formatted };
+  return {
+    eligible: true,
+    not_found: false,
+    formatted_address: custGeo.formatted,
+    area: (custGeo as any).area || null,
+    area_confirmation: (custGeo as any).area
+      ? `Confirm with the customer: "Just to confirm, you're in the ${(custGeo as any).area} area — is that right?" before asking for their full address.`
+      : null,
+  };
 };
 
 export const checkDeliveryAddress = asyncHandler(async (req: Request, res: Response) => {
