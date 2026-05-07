@@ -801,11 +801,11 @@ const geocodePostalCode = async (addressOrPostcode: string) => {
     console.error('[Geocoding] postcodes.io error:', e);
   }
 
-  // Fallback: Google Geocoding if API key is configured
-  const apiKey = (env as any).GOOGLE_PLACES_API;
+  // Fallback: Google Places Text Search if API key is configured
+  const apiKey = env.GOOGLE_PLACES_API;
   if (apiKey) {
     try {
-      const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(addressOrPostcode)}&key=${apiKey}`;
+      const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(postcode)}&key=${apiKey}`;
       const response = await fetch(url);
       const data = await response.json() as any;
       if (data.status === 'OK' && data.results?.length > 0) {
@@ -814,7 +814,7 @@ const geocodePostalCode = async (addressOrPostcode: string) => {
         return { lat, lon: lng, formatted: result.formatted_address };
       }
     } catch (e) {
-      console.error('[Geocoding] Google error:', e);
+      console.error('[Geocoding] Google Places error:', e);
     }
   }
 
