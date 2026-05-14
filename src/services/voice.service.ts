@@ -240,6 +240,7 @@ export const createCallSession = async (config: {
     selectedTools: config.tools,
     firstSpeaker: 'FIRST_SPEAKER_AGENT',
     medium: config.medium || { twilio: {} },
+    voiceOverrides: { cartesia: { speed: 'slow' } },
   };
 
   if (config.firstMessage) {
