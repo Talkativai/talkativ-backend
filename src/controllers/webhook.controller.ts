@@ -1087,7 +1087,7 @@ export const createOrder = asyncHandler(async (req: Request, res: Response) => {
     return;
   }
 
-  if (payment_method === 'pay_now' && totalAmount > 0 && customer_phone && primaryPayInt) {
+  if (payment_method === 'pay_now' && totalAmount > 0 && primaryPayInt) {
     try {
       const businessCurrency = ((business as any).currency || 'GBP').toUpperCase();
       const cfg = primaryPayInt.config as any;
@@ -2335,24 +2335,31 @@ export const ultravoxCallEnded = asyncHandler(async (req: Request, res: Response
   const callId: string | undefined = body.callId;
   if (!callId) return;
 
-  // Format transcript — Ultravox uses role "MESSAGE_ROLE_AGENT"/"MESSAGE_ROLE_USER"
-  const rawTranscript: any[] = body.transcript || [];
-  const transcript = rawTranscript.length > 0
-    ? rawTranscript
-        .map((t: any) => {
-          const role = (t.role || t.speaker || '').toLowerCase();
-          const isAgent = role.includes('agent');
-          const text = t.text || t.message || '';
-          return text ? `${isAgent ? 'Agent' : 'Caller'}: ${text}` : null;
-        })
-        .filter(Boolean)
-        .join('\n')
-    : null;
+  const summary: string | null = body.shortSummary || body.summary || null;
 
-  const summary: string | null = body.summary || null;
+  // Fetch transcript from Ultravox messages API — the webhook body doesn't include it
+  let transcript: string | null = null;
+  try {
+    const msgRes = await fetch(`https://api.ultravox.ai/api/calls/${callId}/messages`, {
+      headers: { 'X-API-Key': env.ULTRAVOX_API_KEY },
+    });
+    if (msgRes.ok) {
+      const msgData = await msgRes.json() as any;
+      const messages: any[] = msgData.results || msgData.messages || [];
+      const lines = messages
+        .filter((m: any) => m.role && m.text)
+        .map((m: any) => {
+          const role = (m.role || '').toLowerCase();
+          const isAgent = role.includes('agent');
+          return `${isAgent ? 'Agent' : 'Caller'}: ${m.text}`;
+        });
+      if (lines.length > 0) transcript = lines.join('\n');
+    }
+  } catch (err: any) {
+    console.error('[UltravoxCallEnded] Failed to fetch transcript:', err.message);
+  }
 
   try {
-    // Find the call record by Ultravox callId (stored in elevenlabsConvId)
     const existing = await prisma.call.findFirst({ where: { elevenlabsConvId: callId } });
     if (existing) {
       await prisma.call.update({
