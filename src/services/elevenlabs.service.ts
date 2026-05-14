@@ -551,6 +551,8 @@ Location: ${business.address || 'Not specified'}
 Opening hours:
 ${hoursStr}
 
+SPEAKING STYLE: Speak at a calm, measured pace — not too fast. When reading out menu items or lists, pause briefly between each item so the customer can follow along easily.
+
 ---
 ${menuSection}
 
