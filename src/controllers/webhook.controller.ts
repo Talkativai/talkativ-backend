@@ -80,18 +80,25 @@ async function resolveCallerPhone(
 ): Promise<string | null> {
   if (providedPhone) return providedPhone;
 
-  // Check the LIVE call record populated by conversation_initiation_metadata
-  const query: any = { businessId, status: 'LIVE' };
-  if (conversationId) query.elevenlabsConvId = conversationId;
+  // Try exact match first (conversationId = Ultravox callId stored in elevenlabsConvId)
+  if (conversationId) {
+    const exactCall = await prisma.call.findFirst({
+      where: { businessId, status: 'LIVE', elevenlabsConvId: conversationId },
+      orderBy: { createdAt: 'desc' },
+      select: { callerPhone: true },
+    });
+    if (exactCall?.callerPhone) return exactCall.callerPhone;
+  }
 
-  const activeCall = await prisma.call.findFirst({
-    where: query,
+  // Fallback: most recent live call for this business — agent often passes a wrong conversation_id
+  const anyLiveCall = await prisma.call.findFirst({
+    where: { businessId, status: 'LIVE' },
     orderBy: { createdAt: 'desc' },
     select: { callerPhone: true },
   });
-  if (activeCall?.callerPhone) return activeCall.callerPhone;
+  if (anyLiveCall?.callerPhone) return anyLiveCall.callerPhone;
 
-  // Fallback: fetch live from Ultravox API (was ElevenLabs API)
+  // Last resort: fetch from Ultravox API
   if (conversationId) {
     try {
       const conv = await elevenlabsService.getConversation(conversationId);
