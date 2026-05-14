@@ -49,9 +49,8 @@ app.use(cors({
 }));
 app.use(morgan('dev'));
 app.use(cookieParser());
-// Limit body payload to 10kb to prevent denial of service by large payloads
-app.use(express.json({ limit: '10kb' }));
-app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+app.use(express.json({ limit: '50kb' }));
+app.use(express.urlencoded({ extended: true, limit: '50kb' }));
 // Data sanitization against NoSQL query injection / XSS
 app.use(xss);
 // Prevent HTTP parameter pollution
