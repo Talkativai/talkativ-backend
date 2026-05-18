@@ -353,28 +353,18 @@ export const getConversation = async (conversationId: string): Promise<any> => {
   };
 };
 
-// ─── Text-to-Speech Preview (Cartesia) ───────────────────────────────────────
+// ─── Voice Preview (Ultravox) ────────────────────────────────────────────────
+// Voice IDs in AVAILABLE_VOICES are Ultravox voice IDs, not Cartesia API IDs.
+// Cartesia's TTS endpoint would 404 for them. Use Ultravox's preview endpoint instead.
 
-export const textToSpeech = async (voiceId: string, text: string): Promise<Buffer> => {
-  const res = await fetch(`${CARTESIA_BASE_URL}/tts/bytes`, {
-    method: 'POST',
-    headers: cartesiaHeaders(),
-    body: JSON.stringify({
-      transcript: text,
-      model_id: 'sonic-2',
-      voice: { mode: 'id', id: voiceId },
-      output_format: {
-        container: 'mp3',
-        encoding: 'mp3',
-        sample_rate: 44100,
-      },
-      language: 'en',
-    }),
+export const textToSpeech = async (voiceId: string, _text: string): Promise<Buffer> => {
+  const res = await fetch(`${ULTRAVOX_BASE_URL}/voices/${voiceId}/preview`, {
+    headers: { 'X-API-Key': env.ULTRAVOX_API_KEY },
   });
 
   if (!res.ok) {
     const error = await res.text();
-    throw new Error(`Cartesia TTS failed [${res.status}]: ${error}`);
+    throw new Error(`Voice preview not available [${res.status}]: ${error}`);
   }
 
   const arrayBuffer = await res.arrayBuffer();
@@ -495,6 +485,8 @@ Business type: ${business.type || 'Restaurant'}
 Location: ${business.address || 'Not specified'}
 Opening hours:
 ${hoursStr}
+
+SPEAKING STYLE: Speak at a calm, measured pace — not too fast. When reading out menu items or lists, pause briefly between each item so the customer can follow along easily. Sound warm and human — never robotic.
 
 ---
 ${menuSection}

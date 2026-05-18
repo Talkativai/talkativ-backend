@@ -531,30 +531,17 @@ export const rebuildSystemPrompt = asyncHandler(async (req: Request, res: Respon
 });
 
 export const previewVoice = async (req: Request, res: Response) => {
-  const { voiceId, text } = req.body as { voiceId: string; text: string };
-  if (!voiceId || !text) {
-    res.status(400).json({ error: 'voiceId and text are required' });
+  const { voiceId } = req.body as { voiceId: string; text?: string };
+  if (!voiceId) {
+    res.status(400).json({ error: 'voiceId is required' });
     return;
   }
   try {
-    const audioBuffer = await elevenlabs.textToSpeech(voiceId, text.slice(0, 500));
+    const audioBuffer = await elevenlabs.textToSpeech(voiceId, '');
     res.json({ audio: audioBuffer.toString('base64') });
   } catch (err: any) {
     const raw = err?.message || '';
-    console.error('[previewVoice] Cartesia TTS error:', raw);
-
-    let userMessage = `Voice preview failed: ${raw}`;
-
-    if (raw.includes('[401]') || raw.toLowerCase().includes('invalid_api_key') || raw.toLowerCase().includes('unauthorized')) {
-      userMessage = 'Cartesia API key is invalid — check CARTESIA_API_KEY in your .env file.';
-    } else if (raw.includes('[429]')) {
-      userMessage = 'Cartesia rate limit reached — try again in a moment.';
-    } else if (raw.includes('[404]') || raw.toLowerCase().includes('voice not found') || raw.toLowerCase().includes('not_found')) {
-      userMessage = 'Voice ID not found in Cartesia — update the IDs in constants.ts and constants.js using your Cartesia dashboard (see setup.md).';
-    } else if (raw.includes('[422]') || raw.toLowerCase().includes('unprocessable')) {
-      userMessage = `Cartesia rejected the request — check voice IDs are valid UUIDs: ${raw}`;
-    }
-
-    res.status(400).json({ error: userMessage });
+    console.error('[previewVoice] error:', raw);
+    res.status(400).json({ error: `Voice preview not available: ${raw}` });
   }
 };
