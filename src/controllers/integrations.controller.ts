@@ -338,8 +338,11 @@ export const squareConnectCallback = asyncHandler(async (req: Request, res: Resp
   catch { return res.redirect(`${base}?square_error=invalid_state${hashPath}`); }
 
   try {
-    // Exchange code for token
-    const tokenRes = await fetch('https://connect.squareup.com/oauth2/token', {
+    // Exchange code for token — use sandbox endpoint when in sandbox mode
+    const squareTokenBase = env.SQUARE_ENVIRONMENT === 'production'
+      ? 'https://connect.squareup.com'
+      : 'https://connect.squareupsandbox.com';
+    const tokenRes = await fetch(`${squareTokenBase}/oauth2/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Square-Version': '2024-02-22' },
       body: JSON.stringify({
