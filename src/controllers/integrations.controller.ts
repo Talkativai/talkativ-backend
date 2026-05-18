@@ -197,21 +197,16 @@ export const stripeConnectInit = asyncHandler(async (req: Request, res: Response
 export const stripeConnectCallback = asyncHandler(async (req: Request, res: Response) => {
   const { code, state, error, error_description } = req.query as Record<string, string>;
 
-  // Query params MUST go before the # so React Router (HashRouter) can match the route.
-  // /#/dashboard/integrations?foo=1 → React Router sees path "/dashboard/integrations?foo=1" (broken)
-  // /?foo=1#/dashboard/integrations  → React Router sees path "/dashboard/integrations", search "?foo=1" (correct)
   const base = env.FRONTEND_URL.replace(/\/$/, '');
-  // Use #/dashboard (not #/dashboard/integrations) — dashboard uses state-based nav, not URL sub-paths.
-  // DashboardApp reads ?stripe_connected=1 from window.location.search to auto-open Integrations.
-  const hashPath = '#/dashboard';
+  const dashPath = '/dashboard';
 
   if (error) {
     console.error('[Stripe Connect] OAuth error:', error, error_description);
-    return res.redirect(`${base}?stripe_error=${encodeURIComponent(error_description || error)}${hashPath}`);
+    return res.redirect(`${base}${dashPath}?stripe_error=${encodeURIComponent(error_description || error)}`);
   }
 
   if (!code || !state) {
-    return res.redirect(`${base}?stripe_error=missing_params${hashPath}`);
+    return res.redirect(`${base}${dashPath}?stripe_error=missing_params`);
   }
 
   let businessId: string;
@@ -224,7 +219,7 @@ export const stripeConnectCallback = asyncHandler(async (req: Request, res: Resp
     }
     businessId = JSON.parse(payload).businessId;
   } catch {
-    return res.redirect(`${base}?stripe_error=invalid_state${hashPath}`);
+    return res.redirect(`${base}${dashPath}?stripe_error=invalid_state`);
   }
 
   try {
@@ -246,10 +241,10 @@ export const stripeConnectCallback = asyncHandler(async (req: Request, res: Resp
       },
     });
 
-    return res.redirect(`${base}?stripe_connected=1${hashPath}`);
+    return res.redirect(`${base}${dashPath}?stripe_connected=1`);
   } catch (err: any) {
     console.error('[Stripe Connect] Token exchange failed:', err);
-    return res.redirect(`${base}?stripe_error=${encodeURIComponent(err.message || 'connection_failed')}${hashPath}`);
+    return res.redirect(`${base}${dashPath}?stripe_error=${encodeURIComponent(err.message || 'connection_failed')}`);
   }
 });
 
@@ -327,15 +322,15 @@ export const squareConnectInit = asyncHandler(async (req: Request, res: Response
 export const squareConnectCallback = asyncHandler(async (req: Request, res: Response) => {
   const { code, state, error } = req.query as Record<string, string>;
   const base = env.FRONTEND_URL.replace(/\/$/, '');
-  const hashPath = '#/dashboard';
+  const dashPath = '/dashboard';
 
   if (error || !code || !state) {
-    return res.redirect(`${base}?square_error=${encodeURIComponent(error || 'missing_params')}${hashPath}`);
+    return res.redirect(`${base}${dashPath}?square_error=${encodeURIComponent(error || 'missing_params')}`);
   }
 
   let businessId: string;
   try { businessId = parseOAuthState(state); }
-  catch { return res.redirect(`${base}?square_error=invalid_state${hashPath}`); }
+  catch { return res.redirect(`${base}${dashPath}?square_error=invalid_state`); }
 
   try {
     // Exchange code for token — use sandbox endpoint when in sandbox mode
@@ -378,10 +373,10 @@ export const squareConnectCallback = asyncHandler(async (req: Request, res: Resp
       create: { businessId, name: 'Square', category: 'ordering', status: 'CONNECTED', config: { accessToken, locationId, merchantId }, lastSynced: new Date() },
     });
 
-    return res.redirect(`${base}?square_connected=1${hashPath}`);
+    return res.redirect(`${base}${dashPath}?square_connected=1`);
   } catch (err: any) {
     console.error('[Square OAuth] Error:', err);
-    return res.redirect(`${base}?square_error=${encodeURIComponent(err.message || 'connection_failed')}${hashPath}`);
+    return res.redirect(`${base}${dashPath}?square_error=${encodeURIComponent(err.message || 'connection_failed')}`);
   }
 });
 
@@ -410,15 +405,15 @@ export const cloverConnectInit = asyncHandler(async (req: Request, res: Response
 export const cloverConnectCallback = asyncHandler(async (req: Request, res: Response) => {
   const { code, merchant_id, state, error } = req.query as Record<string, string>;
   const base = env.FRONTEND_URL.replace(/\/$/, '');
-  const hashPath = '#/dashboard';
+  const dashPath = '/dashboard';
 
   if (error || !code || !state) {
-    return res.redirect(`${base}?clover_error=${encodeURIComponent(error || 'missing_params')}${hashPath}`);
+    return res.redirect(`${base}${dashPath}?clover_error=${encodeURIComponent(error || 'missing_params')}`);
   }
 
   let businessId: string;
   try { businessId = parseOAuthState(state); }
-  catch { return res.redirect(`${base}?clover_error=invalid_state${hashPath}`); }
+  catch { return res.redirect(`${base}${dashPath}?clover_error=invalid_state`); }
 
   try {
     const cloverApiBase = env.CLOVER_ENVIRONMENT === 'production'
@@ -448,10 +443,10 @@ export const cloverConnectCallback = asyncHandler(async (req: Request, res: Resp
       create: { businessId, name: 'Clover', category: 'ordering', status: 'CONNECTED', config: { accessToken, merchantId }, lastSynced: new Date() },
     });
 
-    return res.redirect(`${base}?clover_connected=1${hashPath}`);
+    return res.redirect(`${base}${dashPath}?clover_connected=1`);
   } catch (err: any) {
     console.error('[Clover OAuth] Error:', err);
-    return res.redirect(`${base}?clover_error=${encodeURIComponent(err.message || 'connection_failed')}${hashPath}`);
+    return res.redirect(`${base}${dashPath}?clover_error=${encodeURIComponent(err.message || 'connection_failed')}`);
   }
 });
 
@@ -477,15 +472,15 @@ export const sumupConnectInit = asyncHandler(async (req: Request, res: Response)
 export const sumupConnectCallback = asyncHandler(async (req: Request, res: Response) => {
   const { code, state, error } = req.query as Record<string, string>;
   const base = env.FRONTEND_URL.replace(/\/$/, '');
-  const hashPath = '#/dashboard';
+  const dashPath = '/dashboard';
 
   if (error || !code || !state) {
-    return res.redirect(`${base}?sumup_error=${encodeURIComponent(error || 'missing_params')}${hashPath}`);
+    return res.redirect(`${base}${dashPath}?sumup_error=${encodeURIComponent(error || 'missing_params')}`);
   }
 
   let businessId: string;
   try { businessId = parseOAuthState(state); }
-  catch { return res.redirect(`${base}?sumup_error=invalid_state${hashPath}`); }
+  catch { return res.redirect(`${base}${dashPath}?sumup_error=invalid_state`); }
 
   try {
     const tokenRes = await fetch('https://api.sumup.com/token', {
@@ -519,10 +514,10 @@ export const sumupConnectCallback = asyncHandler(async (req: Request, res: Respo
       create: { businessId, name: 'SumUp', category: 'ordering', status: 'CONNECTED', config: { apiKey: accessToken, merchantCode }, lastSynced: new Date() },
     });
 
-    return res.redirect(`${base}?sumup_connected=1${hashPath}`);
+    return res.redirect(`${base}${dashPath}?sumup_connected=1`);
   } catch (err: any) {
     console.error('[SumUp OAuth] Error:', err);
-    return res.redirect(`${base}?sumup_error=${encodeURIComponent(err.message || 'connection_failed')}${hashPath}`);
+    return res.redirect(`${base}${dashPath}?sumup_error=${encodeURIComponent(err.message || 'connection_failed')}`);
   }
 });
 
@@ -549,15 +544,15 @@ export const zettleConnectInit = asyncHandler(async (req: Request, res: Response
 export const zettleConnectCallback = asyncHandler(async (req: Request, res: Response) => {
   const { code, state, error } = req.query as Record<string, string>;
   const base = env.FRONTEND_URL.replace(/\/$/, '');
-  const hashPath = '#/dashboard';
+  const dashPath = '/dashboard';
 
   if (error || !code || !state) {
-    return res.redirect(`${base}?zettle_error=${encodeURIComponent(error || 'missing_params')}${hashPath}`);
+    return res.redirect(`${base}${dashPath}?zettle_error=${encodeURIComponent(error || 'missing_params')}`);
   }
 
   let businessId: string;
   try { businessId = parseOAuthState(state); }
-  catch { return res.redirect(`${base}?zettle_error=invalid_state${hashPath}`); }
+  catch { return res.redirect(`${base}${dashPath}?zettle_error=invalid_state`); }
 
   try {
     const tokenRes = await fetch('https://oauth.zettle.com/token', {
@@ -591,10 +586,10 @@ export const zettleConnectCallback = asyncHandler(async (req: Request, res: Resp
       create: { businessId, name: 'Zettle', category: 'ordering', status: 'CONNECTED', config: { accessToken, merchantCode }, lastSynced: new Date() },
     });
 
-    return res.redirect(`${base}?zettle_connected=1${hashPath}`);
+    return res.redirect(`${base}${dashPath}?zettle_connected=1`);
   } catch (err: any) {
     console.error('[Zettle OAuth] Error:', err);
-    return res.redirect(`${base}?zettle_error=${encodeURIComponent(err.message || 'connection_failed')}${hashPath}`);
+    return res.redirect(`${base}${dashPath}?zettle_error=${encodeURIComponent(err.message || 'connection_failed')}`);
   }
 });
 
