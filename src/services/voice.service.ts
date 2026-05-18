@@ -353,18 +353,26 @@ export const getConversation = async (conversationId: string): Promise<any> => {
   };
 };
 
-// ─── Voice Preview (Ultravox) ────────────────────────────────────────────────
-// Voice IDs in AVAILABLE_VOICES are Ultravox voice IDs, not Cartesia API IDs.
-// Cartesia's TTS endpoint would 404 for them. Use Ultravox's preview endpoint instead.
+// ─── Text-to-Speech Preview (Cartesia) ───────────────────────────────────────
+// Accepts a Cartesia voice ID (ttsId from the frontend voice catalogue),
+// NOT the Ultravox voice ID used for actual calls.
 
-export const textToSpeech = async (voiceId: string, _text: string): Promise<Buffer> => {
-  const res = await fetch(`${ULTRAVOX_BASE_URL}/voices/${voiceId}/preview`, {
-    headers: { 'X-API-Key': env.ULTRAVOX_API_KEY },
+export const textToSpeech = async (voiceId: string, text: string): Promise<Buffer> => {
+  const res = await fetch(`${CARTESIA_BASE_URL}/tts/bytes`, {
+    method: 'POST',
+    headers: cartesiaHeaders(),
+    body: JSON.stringify({
+      transcript: text,
+      model_id: 'sonic-2',
+      voice: { mode: 'id', id: voiceId },
+      output_format: { container: 'mp3', bit_rate: 128000, sample_rate: 44100 },
+      language: 'en',
+    }),
   });
 
   if (!res.ok) {
     const error = await res.text();
-    throw new Error(`Voice preview not available [${res.status}]: ${error}`);
+    throw new Error(`Cartesia TTS failed [${res.status}]: ${error}`);
   }
 
   const arrayBuffer = await res.arrayBuffer();

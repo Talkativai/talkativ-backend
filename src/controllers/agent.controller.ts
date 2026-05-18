@@ -531,17 +531,25 @@ export const rebuildSystemPrompt = asyncHandler(async (req: Request, res: Respon
 });
 
 export const previewVoice = async (req: Request, res: Response) => {
-  const { voiceId } = req.body as { voiceId: string; text?: string };
-  if (!voiceId) {
-    res.status(400).json({ error: 'voiceId is required' });
+  const { voiceId, text } = req.body as { voiceId: string; text: string };
+  if (!voiceId || !text) {
+    res.status(400).json({ error: 'voiceId and text are required' });
     return;
   }
   try {
-    const audioBuffer = await elevenlabs.textToSpeech(voiceId, '');
+    const audioBuffer = await elevenlabs.textToSpeech(voiceId, text.slice(0, 500));
     res.json({ audio: audioBuffer.toString('base64') });
   } catch (err: any) {
     const raw = err?.message || '';
-    console.error('[previewVoice] error:', raw);
-    res.status(400).json({ error: `Voice preview not available: ${raw}` });
+    console.error('[previewVoice] Cartesia TTS error:', raw);
+    let userMessage = `Voice preview failed: ${raw}`;
+    if (raw.includes('[401]') || raw.toLowerCase().includes('unauthorized')) {
+      userMessage = 'Cartesia API key is invalid — check CARTESIA_API_KEY in environment variables.';
+    } else if (raw.includes('[429]')) {
+      userMessage = 'Voice preview rate limit reached — try again in a moment.';
+    } else if (raw.includes('[404]')) {
+      userMessage = 'Voice not found — this voice may have been removed from Cartesia.';
+    }
+    res.status(400).json({ error: userMessage });
   }
 };
