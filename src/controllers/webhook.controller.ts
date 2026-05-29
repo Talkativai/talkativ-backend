@@ -2224,16 +2224,25 @@ export const twilioInboundCall = asyncHandler(async (req: Request, res: Response
   const callerPhone: string = req.body.From || req.body.Caller || '';
   const callSid: string = req.body.CallSid || '';
 
-  // Look up which business owns this Twilio number
-  const phoneConfig = await prisma.phoneConfig.findFirst({
-    where: { assignedNumber: toNumber },
-    include: { business: { include: { agent: true } } },
-  });
+  const sendTwiML = (xml: string) => res.type('text/xml').send(xml);
+  const sorryTwiML = `<?xml version="1.0" encoding="UTF-8"?><Response><Say>Sorry, our service is temporarily unavailable. Please try again in a moment.</Say><Hangup/></Response>`;
+
+  let phoneConfig: any;
+  try {
+    // Look up which business owns this Twilio number
+    phoneConfig = await prisma.phoneConfig.findFirst({
+      where: { assignedNumber: toNumber },
+      include: { business: { include: { agent: true } } },
+    });
+  } catch (dbErr: any) {
+    console.error('[TwilioInbound] DB lookup failed:', dbErr.message);
+    sendTwiML(sorryTwiML);
+    return;
+  }
 
   if (!phoneConfig?.business) {
     // Unknown number — return TwiML that hangs up gracefully
-    res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
-<Response><Say>Sorry, this number is not configured. Goodbye.</Say><Hangup/></Response>`);
+    sendTwiML(`<?xml version="1.0" encoding="UTF-8"?><Response><Say>Sorry, this number is not configured. Goodbye.</Say><Hangup/></Response>`);
     return;
   }
 
@@ -2247,16 +2256,23 @@ export const twilioInboundCall = asyncHandler(async (req: Request, res: Response
   }
 
   // Build system prompt and tools fresh for this call
-  const [dbMenuCategories, faqs, orderingPolicy, reservationPolicy] = await Promise.all([
-    prisma.menuCategory.findMany({
-      where: { businessId: business.id },
-      include: { items: { where: { status: 'ACTIVE' }, orderBy: { name: 'asc' } } },
-      orderBy: { sortOrder: 'asc' },
-    }),
-    prisma.faq.findMany({ where: { businessId: business.id }, orderBy: { position: 'asc' } }),
-    prisma.orderingPolicy.findUnique({ where: { businessId: business.id } }),
-    prisma.reservationPolicy.findUnique({ where: { businessId: business.id } }),
-  ]);
+  let dbMenuCategories: any[] = [], faqs: any[] = [], orderingPolicy: any = null, reservationPolicy: any = null;
+  try {
+    [dbMenuCategories, faqs, orderingPolicy, reservationPolicy] = await Promise.all([
+      prisma.menuCategory.findMany({
+        where: { businessId: business.id },
+        include: { items: { where: { status: 'ACTIVE' }, orderBy: { name: 'asc' } } },
+        orderBy: { sortOrder: 'asc' },
+      }),
+      prisma.faq.findMany({ where: { businessId: business.id }, orderBy: { position: 'asc' } }),
+      prisma.orderingPolicy.findUnique({ where: { businessId: business.id } }),
+      prisma.reservationPolicy.findUnique({ where: { businessId: business.id } }),
+    ]);
+  } catch (dbErr: any) {
+    console.error('[TwilioInbound] DB queries failed:', dbErr.message);
+    sendTwiML(sorryTwiML);
+    return;
+  }
 
   const systemPrompt = elevenlabsService.buildSystemPrompt({
     name: business.name,
