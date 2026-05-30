@@ -246,9 +246,21 @@ export const createCallSession = async (config: {
     body.initialMessages = [{ role: 'MESSAGE_ROLE_AGENT', text: config.firstMessage }];
   }
 
+  // if (config.callEndedWebhookUrl) {
+  //   body.callEndedWebhookUrl = config.callEndedWebhookUrl;
+  // }
+
+
+
   if (config.callEndedWebhookUrl) {
-    body.callEndedWebhookUrl = config.callEndedWebhookUrl;
-  }
+  body.callbacks = [
+    {
+      event: 'event_call_ended',
+      url: config.callEndedWebhookUrl,
+      method: 'POST',
+    },
+  ];
+}
 
   const res = await fetch(`${ULTRAVOX_BASE_URL}/calls`, {
     method: 'POST',
