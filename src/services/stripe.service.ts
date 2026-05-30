@@ -115,19 +115,59 @@ export const createPaymentIntent = async (amount: number, currency: string, meta
 // ─── Payment Intent via Stripe Connect (destination charge) ──────────────────
 // Money flows: customer → directly to connected account. No platform fee taken.
 
+// export const createPaymentIntentWithConnect = async (
+//   amount: number,
+//   currency: string,
+//   metadata: Record<string, string>,
+//   connectedAccountId: string,
+// ) => {
+//   return stripe.paymentIntents.create({
+//     amount,
+//     currency,
+//     metadata,
+//     transfer_data: { destination: connectedAccountId },
+//   });
+// };
+
+
+
 export const createPaymentIntentWithConnect = async (
   amount: number,
   currency: string,
   metadata: Record<string, string>,
   connectedAccountId: string,
 ) => {
-  return stripe.paymentIntents.create({
-    amount,
-    currency,
-    metadata,
-    transfer_data: { destination: connectedAccountId },
-  });
+  try {
+    // Try Connect (destination charge) first
+    return await stripe.paymentIntents.create({
+      amount,
+      currency,
+      metadata,
+      transfer_data: { destination: connectedAccountId },
+    });
+  } catch (err: any) {
+    // If connected account isn't fully onboarded, fall back to direct charge
+    if (err?.code === 'insufficient_capabilities_for_transfer') {
+      console.warn(`[Stripe] Connected account ${connectedAccountId} not ready — falling back to direct charge`);
+      return await stripe.paymentIntents.create({
+        amount,
+        currency,
+        metadata,
+      });
+    }
+    throw err;
+  }
 };
+
+
+
+
+
+
+
+
+
+
 
 // ─── Get default payment method details for a customer ───────────────────────
 
