@@ -252,14 +252,8 @@ export const createCallSession = async (config: {
 
 
 
-  if (config.callEndedWebhookUrl) {
-  body.callbacks = [
-    {
-      event: 'event_call_ended',
-      url: config.callEndedWebhookUrl,
-      method: 'POST',
-    },
-  ];
+ if (config.callEndedWebhookUrl) {
+  body.callbacks = [config.callEndedWebhookUrl];
 }
 
   const res = await fetch(`${ULTRAVOX_BASE_URL}/calls`, {
