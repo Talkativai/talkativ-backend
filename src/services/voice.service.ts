@@ -252,12 +252,14 @@ export const createCallSession = async (config: {
 
 
 
-if (config.callEndedWebhookUrl) {
+
+  if (config.callEndedWebhookUrl) {
   body.callbacks = {
-    ended: config.callEndedWebhookUrl,
+    ended: {
+      url: config.callEndedWebhookUrl,
+    },
   };
 }
-
 
 
 
