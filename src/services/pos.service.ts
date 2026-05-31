@@ -69,6 +69,7 @@ export const pushOrderToSquare = async (
           type: 'DELIVERY',
           state: 'PROPOSED',
           delivery_details: {
+            schedule_type: 'ASAP',
             recipient: {
               display_name: payload.customerName,
               ...(payload.customerPhone && { phone_number: payload.customerPhone }),
