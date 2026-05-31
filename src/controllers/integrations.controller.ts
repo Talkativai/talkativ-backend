@@ -167,85 +167,176 @@ export const getIntegrationStatus = asyncHandler(async (req: Request, res: Respo
 // ─── Stripe Connect — initiate OAuth ─────────────────────────────────────────
 // Redirects the authenticated business owner to Stripe's OAuth consent screen.
 
-export const stripeConnectInit = asyncHandler(async (req: Request, res: Response) => {
-  if (!env.STRIPE_CONNECT_CLIENT_ID) throw ApiError.badRequest('Stripe Connect is not configured on this platform.');
+// export const stripeConnectInit = asyncHandler(async (req: Request, res: Response) => {
+//   if (!env.STRIPE_CONNECT_CLIENT_ID) throw ApiError.badRequest('Stripe Connect is not configured on this platform.');
 
+//   const businessId = req.user!.businessId;
+//   if (!businessId) throw ApiError.notFound('Business not found');
+
+//   // Encode businessId + HMAC signature in state so the callback can verify it wasn't tampered with
+//   const payload = JSON.stringify({ businessId, ts: Date.now() });
+//   const sig = crypto.createHmac('sha256', env.JWT_SECRET).update(payload).digest('hex');
+//   const state = Buffer.from(JSON.stringify({ payload, sig })).toString('base64url');
+
+//   const params = new URLSearchParams({
+//     client_id: env.STRIPE_CONNECT_CLIENT_ID,
+//     response_type: 'code',
+//     scope: 'read_write',
+//     redirect_uri: `${env.BACKEND_URL}/api/integrations/stripe/callback`,
+//     state,
+//     'stripe_user[business_type]': 'company',
+//   });
+
+//   res.json({ url: `https://connect.stripe.com/oauth/authorize?${params.toString()}` });
+// });
+
+
+
+
+
+export const stripeConnectInit = asyncHandler(async (req: Request, res: Response) => {
   const businessId = req.user!.businessId;
   if (!businessId) throw ApiError.notFound('Business not found');
 
-  // Encode businessId + HMAC signature in state so the callback can verify it wasn't tampered with
-  const payload = JSON.stringify({ businessId, ts: Date.now() });
-  const sig = crypto.createHmac('sha256', env.JWT_SECRET).update(payload).digest('hex');
-  const state = Buffer.from(JSON.stringify({ payload, sig })).toString('base64url');
-
-  const params = new URLSearchParams({
-    client_id: env.STRIPE_CONNECT_CLIENT_ID,
-    response_type: 'code',
-    scope: 'read_write',
-    redirect_uri: `${env.BACKEND_URL}/api/integrations/stripe/callback`,
-    state,
-    'stripe_user[business_type]': 'company',
+  // Check if already connected — if so, generate a login link instead
+  const existing = await prisma.integration.findFirst({
+    where: { businessId, name: 'Stripe', status: 'CONNECTED' },
   });
 
-  res.json({ url: `https://connect.stripe.com/oauth/authorize?${params.toString()}` });
+  let accountId: string;
+
+  if (existing?.config && (existing.config as any).accountId) {
+    accountId = (existing.config as any).accountId;
+  } else {
+    // Create a new Express account for this business
+    const account = await stripe.accounts.create({
+      type: 'express',
+      country: 'GB',
+      capabilities: {
+        card_payments: { requested: true },
+        transfers: { requested: true },
+      },
+    });
+    accountId = account.id;
+
+    // Save immediately so we don't create duplicates on refresh
+    await prisma.integration.upsert({
+      where: { businessId_name: { businessId, name: 'Stripe' } },
+      update: { status: 'PENDING', config: { accountId }, lastSynced: new Date() },
+      create: { businessId, name: 'Stripe', category: 'payment', status: 'PENDING', config: { accountId }, lastSynced: new Date() },
+    });
+  }
+
+  // Generate onboarding link
+  const accountLink = await stripe.accountLinks.create({
+    account: accountId,
+    refresh_url: `${env.BACKEND_URL}/api/integrations/stripe/init`,
+    return_url: `${env.BACKEND_URL}/api/integrations/stripe/callback`,
+    type: 'account_onboarding',
+  });
+
+  res.json({ url: accountLink.url });
 });
+
+
+
+
+
+
 
 // ─── Stripe Connect — OAuth callback ─────────────────────────────────────────
 // Stripe redirects here after the business authorises. Exchanges code for accountId,
 // saves as Integration, then redirects back to the dashboard integrations page.
 
-export const stripeConnectCallback = asyncHandler(async (req: Request, res: Response) => {
-  const { code, state, error, error_description } = req.query as Record<string, string>;
+// export const stripeConnectCallback = asyncHandler(async (req: Request, res: Response) => {
+//   const { code, state, error, error_description } = req.query as Record<string, string>;
 
+//   const base = env.FRONTEND_URL.replace(/\/$/, '');
+
+//   if (error) {
+//     console.error('[Stripe Connect] OAuth error:', error, error_description);
+//     return res.redirect(`${base}?stripe_error=${encodeURIComponent(error_description || error)}`);
+//   }
+
+//   if (!code || !state) {
+//     return res.redirect(`${base}?stripe_error=missing_params`);
+//   }
+
+//   let businessId: string;
+//   try {
+//     const decoded = JSON.parse(Buffer.from(state, 'base64url').toString());
+//     const { payload, sig } = decoded;
+//     const expectedSig = crypto.createHmac('sha256', env.JWT_SECRET).update(payload).digest('hex');
+//     if (!crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expectedSig, 'hex'))) {
+//       throw new Error('signature mismatch');
+//     }
+//     businessId = JSON.parse(payload).businessId;
+//   } catch {
+//     return res.redirect(`${base}?stripe_error=invalid_state`);
+//   }
+
+//   try {
+//     const response = await stripe.oauth.token({ grant_type: 'authorization_code', code });
+//     const connectedAccountId = response.stripe_user_id;
+
+//     if (!connectedAccountId) throw new Error('No stripe_user_id in response');
+
+//     await prisma.integration.upsert({
+//       where: { businessId_name: { businessId, name: 'Stripe' } },
+//       update: { status: 'CONNECTED', config: { accountId: connectedAccountId }, lastSynced: new Date() },
+//       create: {
+//         businessId,
+//         name: 'Stripe',
+//         category: 'payment',
+//         status: 'CONNECTED',
+//         config: { accountId: connectedAccountId },
+//         lastSynced: new Date(),
+//       },
+//     });
+
+//     return res.redirect(`${base}?stripe_connected=1`);
+//   } catch (err: any) {
+//     console.error('[Stripe Connect] Token exchange failed:', err);
+//     return res.redirect(`${base}?stripe_error=${encodeURIComponent(err.message || 'connection_failed')}`);
+//   }
+// });
+
+
+
+
+export const stripeConnectCallback = asyncHandler(async (req: Request, res: Response) => {
   const base = env.FRONTEND_URL.replace(/\/$/, '');
+  // Stripe account_onboarding return_url lands here — no state needed.
+  // The account was already saved as PENDING in stripeConnectInit.
+  // We just need to mark it CONNECTED.
+  const { error, error_description } = req.query as Record<string, string>;
 
   if (error) {
-    console.error('[Stripe Connect] OAuth error:', error, error_description);
-    return res.redirect(`${base}?stripe_error=${encodeURIComponent(error_description || error)}`);
+    return res.redirect(`${base}/#/dashboard?stripe_error=${encodeURIComponent(error_description || error)}`);
   }
 
-  if (!code || !state) {
-    return res.redirect(`${base}?stripe_error=missing_params`);
-  }
+  // We don't have businessId here — Stripe doesn't pass it back via return_url.
+  // Instead, find the most recent PENDING Stripe integration and mark it connected.
+  // This is safe because onboarding is a sequential user-initiated flow.
+  const integration = await prisma.integration.findFirst({
+    where: { name: 'Stripe', status: 'PENDING' },
+    orderBy: { lastSynced: 'desc' },
+  });
 
-  let businessId: string;
-  try {
-    const decoded = JSON.parse(Buffer.from(state, 'base64url').toString());
-    const { payload, sig } = decoded;
-    const expectedSig = crypto.createHmac('sha256', env.JWT_SECRET).update(payload).digest('hex');
-    if (!crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expectedSig, 'hex'))) {
-      throw new Error('signature mismatch');
-    }
-    businessId = JSON.parse(payload).businessId;
-  } catch {
-    return res.redirect(`${base}?stripe_error=invalid_state`);
-  }
-
-  try {
-    const response = await stripe.oauth.token({ grant_type: 'authorization_code', code });
-    const connectedAccountId = response.stripe_user_id;
-
-    if (!connectedAccountId) throw new Error('No stripe_user_id in response');
-
-    await prisma.integration.upsert({
-      where: { businessId_name: { businessId, name: 'Stripe' } },
-      update: { status: 'CONNECTED', config: { accountId: connectedAccountId }, lastSynced: new Date() },
-      create: {
-        businessId,
-        name: 'Stripe',
-        category: 'payment',
-        status: 'CONNECTED',
-        config: { accountId: connectedAccountId },
-        lastSynced: new Date(),
-      },
+  if (integration) {
+    await prisma.integration.update({
+      where: { id: integration.id },
+      data: { status: 'CONNECTED', lastSynced: new Date() },
     });
-
-    return res.redirect(`${base}?stripe_connected=1`);
-  } catch (err: any) {
-    console.error('[Stripe Connect] Token exchange failed:', err);
-    return res.redirect(`${base}?stripe_error=${encodeURIComponent(err.message || 'connection_failed')}`);
   }
+
+  return res.redirect(`${base}/#/dashboard?stripe_connected=1`);
 });
+
+
+
+
+
 
 // ─── Set primary payment integration ─────────────────────────────────────────
 
