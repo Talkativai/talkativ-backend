@@ -222,8 +222,8 @@ export const stripeConnectInit = asyncHandler(async (req: Request, res: Response
     // Save immediately so we don't create duplicates on refresh
     await prisma.integration.upsert({
       where: { businessId_name: { businessId, name: 'Stripe' } },
-      update: { status: 'PENDING', config: { accountId }, lastSynced: new Date() },
-      create: { businessId, name: 'Stripe', category: 'payment', status: 'PENDING', config: { accountId }, lastSynced: new Date() },
+      update: { status: 'AVAILABLE', config: { accountId }, lastSynced: new Date() },
+      create: { businessId, name: 'Stripe', category: 'payment', status: 'AVAILABLE', config: { accountId }, lastSynced: new Date() },
     });
   }
 
@@ -319,7 +319,7 @@ export const stripeConnectCallback = asyncHandler(async (req: Request, res: Resp
   // Instead, find the most recent PENDING Stripe integration and mark it connected.
   // This is safe because onboarding is a sequential user-initiated flow.
   const integration = await prisma.integration.findFirst({
-    where: { name: 'Stripe', status: 'PENDING' },
+    where: { name: 'Stripe', status: 'AVAILABLE' },
     orderBy: { lastSynced: 'desc' },
   });
 
