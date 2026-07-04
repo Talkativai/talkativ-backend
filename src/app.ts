@@ -80,7 +80,9 @@ app.use('/api/admin', apiLimiter, adminRoutes);
 
 // ─── Webhook Routes (public — no API limiter, own limiter) ───────────────────
 app.use('/webhooks', webhookRoutes);
-app.use('/api/public', webhookRoutes);
+// NOTE: previously also mounted at '/api/public', which produced dead
+// '/api/public/public/*' paths (double prefix) and an unprotected duplicate of
+// the tool endpoints. Removed — the agent tools all call '/webhooks/public/*'.
 
 // ─── Public Business Search (for onboarding, no auth needed) ─────────────────
 import * as googlePlaces from './services/google-places.service.js';

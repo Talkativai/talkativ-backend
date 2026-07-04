@@ -43,6 +43,20 @@ export const buildAgentTools = (config: {
         schema,
         required: required.includes(paramName),
       })),
+      // Shared secret sent as a header on every tool call so the backend can
+      // authenticate that the request genuinely originated from our agent.
+      // Verified by verifyToolSecret middleware on the /webhooks/public/* routes.
+      ...(env.AGENT_WEBHOOK_SECRET
+        ? {
+            staticParameters: [
+              {
+                name: 'x-webhook-secret',
+                location: 'PARAMETER_LOCATION_HEADER',
+                value: env.AGENT_WEBHOOK_SECRET,
+              },
+            ],
+          }
+        : {}),
       http: { baseUrlPattern: url, httpMethod: 'POST' },
     },
   });

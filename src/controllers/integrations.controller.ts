@@ -119,6 +119,20 @@ export const listIntegrations = asyncHandler(async (req: Request, res: Response)
   res.json(integrations);
 });
 
+// ─── Which OAuth providers are actually configured on this platform ──────────
+// The one-tap OAuth integrations (Square/Clover/SumUp/Zettle/Stripe Connect)
+// only work if the platform has registered an OAuth app and set the client IDs.
+// The frontend uses this to hide connect buttons that would just error out.
+export const getAvailableProviders = asyncHandler(async (_req: Request, res: Response) => {
+  res.json({
+    stripe: !!env.STRIPE_CONNECT_CLIENT_ID,
+    square: !!env.SQUARE_CLIENT_ID,
+    clover: !!env.CLOVER_APP_ID,
+    sumup: !!env.SUMUP_CLIENT_ID,
+    zettle: !!env.ZETTLE_CLIENT_ID,
+  });
+});
+
 // ─── Connect integration (credential-based) ──────────────────────────────────
 
 export const connectIntegration = asyncHandler(async (req: Request, res: Response) => {
@@ -159,7 +173,11 @@ export const disconnectIntegration = asyncHandler(async (req: Request, res: Resp
 // ─── Get integration status ───────────────────────────────────────────────────
 
 export const getIntegrationStatus = asyncHandler(async (req: Request, res: Response) => {
-  const integration = await prisma.integration.findUnique({ where: { id: req.params.id } });
+  const businessId = req.user!.businessId;
+  if (!businessId) throw ApiError.notFound('Business not found');
+  // Scope to the caller's business — prevents cross-tenant IDOR where any
+  // authenticated user could probe another business's integration by id.
+  const integration = await prisma.integration.findFirst({ where: { id: req.params.id, businessId } });
   if (!integration) throw ApiError.notFound('Integration not found');
   res.json({ id: integration.id, name: integration.name, status: integration.status, lastSynced: integration.lastSynced });
 });

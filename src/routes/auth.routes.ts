@@ -19,7 +19,7 @@ router.post('/logout', authController.logout);
 
 // Password reset (public)
 router.post('/forgot-password', authLimiter, validate(forgotPasswordSchema), authController.forgotPassword);
-router.post('/reset-password/:token', authLimiter, validate(resetPasswordSchema), authController.resetPassword);
+router.post('/reset-password', authLimiter, validate(resetPasswordSchema), authController.resetPassword);
 
 // Email verification (public)
 router.post('/verify-email/:token', authController.verifyEmail);

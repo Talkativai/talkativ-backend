@@ -15,6 +15,7 @@ router.get('/zettle/callback', integrationsController.zettleConnectCallback);
 router.use(authenticate);
 
 router.get('/', integrationsController.listIntegrations);
+router.get('/available-providers', integrationsController.getAvailableProviders);
 router.post('/connect', integrationsController.connectIntegration);
 
 // OAuth init endpoints — must be before /:id routes

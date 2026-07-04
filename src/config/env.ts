@@ -74,6 +74,11 @@ const envSchema = z.object({
   TWILIO_BUNDLE_SID: z.string().default(''),
   TWILIO_ADDRESS_SID: z.string().default(''),
   TWILIO_MESSAGING_SERVICE_SID: z.string().default(''), // MG... SID — sends SMS via Messaging Service (alphanumeric sender)
+  // Twilio inbound webhook signature validation:
+  //   'off'     — do not validate (dev only)
+  //   'warn'    — validate and log failures, but still process the request (safe rollout default)
+  //   'enforce' — reject requests that fail signature validation
+  TWILIO_VALIDATE_SIGNATURE: z.enum(['off', 'warn', 'enforce']).default('warn'),
 
   // ElevenLabs demo agent — commented out, replaced by Ultravox (no equivalent needed)
   // ELEVENLABS_DEMO_AGENT_ID: z.string().default(''),

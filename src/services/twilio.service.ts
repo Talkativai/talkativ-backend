@@ -219,10 +219,18 @@ export const sendSms = async (to: string, body: string, fromNumber?: string): Pr
   try {
     const msgServiceSid = env.TWILIO_MESSAGING_SERVICE_SID;
 
+    // Ask Twilio to POST delivery-status events (queued → sent → delivered) back to us
+    // so we can measure real end-to-end latency. Only set when we have a public URL.
+    const statusCallback = env.BACKEND_URL
+      ? `${env.BACKEND_URL}/webhooks/public/sms-status`
+      : undefined;
+
+    const dispatchedAt = Date.now();
+
     if (msgServiceSid) {
       // Preferred: send via Messaging Service (alphanumeric sender — works with voice-only numbers)
-      await client.messages.create({ to, body, messagingServiceSid: msgServiceSid });
-      console.log(`[Twilio] SMS sent via Messaging Service to ${to}`);
+      const msg = await client.messages.create({ to, body, messagingServiceSid: msgServiceSid, statusCallback });
+      console.log(`[Twilio] SMS queued via Messaging Service to ${to} (sid=${msg.sid}, apiLatency=${Date.now() - dispatchedAt}ms)`);
       return true;
     }
 
@@ -232,8 +240,8 @@ export const sendSms = async (to: string, body: string, fromNumber?: string): Pr
       console.error('[Twilio] sendSms: no from number and no Messaging Service configured');
       return false;
     }
-    await client.messages.create({ to, from, body });
-    console.log(`[Twilio] SMS sent from ${from} to ${to}`);
+    const msg = await client.messages.create({ to, from, body, statusCallback });
+    console.log(`[Twilio] SMS queued from ${from} to ${to} (sid=${msg.sid}, apiLatency=${Date.now() - dispatchedAt}ms)`);
     return true;
   } catch (e: any) {
     console.error('[Twilio] sendSms failed:', e.message);

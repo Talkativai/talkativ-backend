@@ -2426,3 +2426,21 @@ export const transferCall = asyncHandler(async (req: Request, res: Response) => 
 
   res.json({ success: true, transferred_to: transfer_to });
 });
+
+// ─── SMS Delivery Status Callback (Twilio) ───────────────────────────────────
+// Twilio POSTs here for each status transition of an outbound SMS
+// (queued → sending → sent → delivered / undelivered / failed). Logging the
+// status + timestamp lets us measure real end-to-end delivery latency and spot
+// carrier filtering (e.g. unregistered alphanumeric sender IDs being delayed).
+export const smsStatus = asyncHandler(async (req: Request, res: Response) => {
+  res.sendStatus(204); // ack immediately — Twilio doesn't need a body
+
+  const { MessageSid, MessageStatus, To, ErrorCode } = req.body || {};
+  const line = `[Twilio][SMS-status] sid=${MessageSid} to=${To} status=${MessageStatus}` +
+    (ErrorCode ? ` errorCode=${ErrorCode}` : '');
+  if (MessageStatus === 'undelivered' || MessageStatus === 'failed') {
+    console.error(line);
+  } else {
+    console.log(line);
+  }
+});
